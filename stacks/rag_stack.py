@@ -8,6 +8,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 import json
+import boto3
 
 
 class RagStack(cdk.Stack):
@@ -53,8 +54,11 @@ class RagStack(cdk.Stack):
         # IAM ROLE FOR BEDROCK KNOWLEDGE BASE
         # ------------------------------------------------------------------ #
 
+        _kb_role_name = "email-agent-kb-role"
+
         kb_role = iam.Role(
             self, "KnowledgeBaseRole",
+            role_name=_kb_role_name,
             assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
             inline_policies={
                 "KBPolicy": iam.PolicyDocument(statements=[
@@ -76,6 +80,114 @@ class RagStack(cdk.Stack):
                 ])
             },
         )
+
+        # ------------------------------------------------------------------ #
+        # AOSS DATA ACCESS POLICY
+        # Uses Fn.sub so ${AWS::AccountId} is resolved before reaching AOSS
+        # ------------------------------------------------------------------ #
+
+        account_id = boto3.client("sts").get_caller_identity()["Account"]
+        region = boto3.client("sts").meta.region_name or "eu-west-1"
+        # CFN execution role is what CfnIndex uses to call the AOSS API
+        cfn_exec_role = f"arn:aws:iam::{account_id}:role/cdk-hnb659fds-cfn-exec-role-{account_id}-{region}"
+        principals = [
+            f"arn:aws:iam::{account_id}:role/{_kb_role_name}",
+            cfn_exec_role,
+        ]
+
+        data_access_policy = oss.CfnAccessPolicy(
+            self, "OSSDataAccessPolicy",
+            name="email-agent-data",
+            type="data",
+            policy=json.dumps([{
+                "Rules": [
+                    {
+                        "Resource": ["index/email-agent-kb/*"],
+                        "Permission": [
+                            "aoss:CreateIndex",
+                            "aoss:DeleteIndex",
+                            "aoss:UpdateIndex",
+                            "aoss:DescribeIndex",
+                            "aoss:ReadDocument",
+                            "aoss:WriteDocument",
+                        ],
+                        "ResourceType": "index",
+                    },
+                    {
+                        "Resource": ["collection/email-agent-kb"],
+                        "Permission": ["aoss:DescribeCollectionItems"],
+                        "ResourceType": "collection",
+                    },
+                ],
+                "Principal": principals,
+            }]),
+        )
+
+        # AOSS propagates data access policies asynchronously (~60-90 s).
+        # This waiter fires once at stack creation to absorb that delay before
+        # CfnIndex calls CreateIndex.
+        waiter_fn = lambda_.Function(
+            self, "OSSPolicyWaiter",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="index.handler",
+            code=lambda_.Code.from_inline(
+                "import time, json, urllib.request\n"
+                "def handler(e, c):\n"
+                "  status = 'SUCCESS'\n"
+                "  try:\n"
+                "    if e['RequestType'] == 'Create': time.sleep(90)\n"
+                "  except Exception:\n"
+                "    status = 'FAILED'\n"
+                "  b = json.dumps({'Status':status,'PhysicalResourceId':'waiter',"
+                "'StackId':e['StackId'],'RequestId':e['RequestId'],"
+                "'LogicalResourceId':e['LogicalResourceId'],'Data':{}}).encode()\n"
+                "  urllib.request.urlopen(urllib.request.Request("
+                "e['ResponseURL'],data=b,"
+                "headers={'content-type':'','content-length':str(len(b))},"
+                "method='PUT'))\n"
+            ),
+            timeout=cdk.Duration.seconds(150),
+        )
+
+        waiter_cr = cdk.CustomResource(
+            self, "OSSPolicyWaiterCR",
+            service_token=waiter_fn.function_arn,
+        )
+        waiter_cr.node.add_dependency(data_access_policy)
+
+        # ------------------------------------------------------------------ #
+        # AOSS INDEX — native CloudFormation resource, no custom resource needed
+        # ------------------------------------------------------------------ #
+
+        oss_index = oss.CfnIndex(
+            self, "OSSIndex",
+            collection_endpoint=self.oss_collection.attr_collection_endpoint,
+            index_name="email-agent-index",
+            mappings=oss.CfnIndex.MappingsProperty(
+                properties={
+                    "embedding": oss.CfnIndex.PropertyMappingProperty(
+                        type="knn_vector",
+                        dimension=1024,
+                        method=oss.CfnIndex.MethodProperty(
+                            name="hnsw",
+                            engine="nmslib",
+                            space_type="l2",
+                            parameters=oss.CfnIndex.ParametersProperty(
+                                ef_construction=512,
+                                m=16,
+                            ),
+                        ),
+                    ),
+                    "text": oss.CfnIndex.PropertyMappingProperty(type="text"),
+                    "metadata": oss.CfnIndex.PropertyMappingProperty(type="text"),
+                },
+            ),
+            settings=oss.CfnIndex.IndexSettingsProperty(
+                index=oss.CfnIndex.IndexProperty(knn=True),
+            ),
+        )
+        oss_index.add_dependency(self.oss_collection)
+        oss_index.node.add_dependency(waiter_cr)
 
         # ------------------------------------------------------------------ #
         # BEDROCK KNOWLEDGE BASE
@@ -106,6 +218,7 @@ class RagStack(cdk.Stack):
                 ),
             ),
         )
+        self.knowledge_base.add_dependency(oss_index)
 
         # Data source per department
         for dept in ["hr", "legal", "it", "general"]:
