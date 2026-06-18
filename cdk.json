@@ -1,0 +1,21 @@
+{
+  "app": "python3 app.py",
+  "watch": {
+    "include": ["**"],
+    "exclude": [
+      "README.md",
+      "cdk*.json",
+      "**/__pycache__/**",
+      "**/.*",
+      "**/node_modules/**",
+      "frontend/node_modules/**"
+    ]
+  },
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:stackRelativeExports": true,
+    "email_from": "your-verified-sender@gmail.com",
+    "email_demo_recipient": "your-verified-recipient@gmail.com",
+    "approver_email": "approver@gmail.com"
+  }
+}
