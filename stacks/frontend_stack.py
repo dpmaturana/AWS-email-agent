@@ -5,6 +5,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_iam as iam,
     aws_s3 as s3,
+    aws_s3_deployment as s3deploy,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
     aws_logs as logs,
@@ -189,6 +190,15 @@ class FrontendStack(cdk.Stack):
                 ),
             ],
             default_root_object="index.html",
+        )
+
+        # Deploy React build to S3 and invalidate CloudFront cache
+        s3deploy.BucketDeployment(
+            self, "DeployReactApp",
+            sources=[s3deploy.Source.asset("frontend/dist")],
+            destination_bucket=spa_bucket,
+            distribution=distribution,
+            distribution_paths=["/*"],
         )
 
         # ------------------------------------------------------------------ #

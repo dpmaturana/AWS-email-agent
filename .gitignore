@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# CDK
+cdk.out/
+
+# Node / React
+frontend/node_modules/
+frontend/dist/
+
+# Environment secrets
+frontend/.env.local
+frontend/.env
+.env

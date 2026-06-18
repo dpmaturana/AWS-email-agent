@@ -1,0 +1,170 @@
+import type { WaiverDetail, WaiverSummary } from '../types/waiver'
+
+export const MOCK_WAIVERS: WaiverSummary[] = [
+  {
+    waiver_id: 'WVR-001',
+    email_from: 'alice.johnson@university.edu',
+    department: 'Computer Science',
+    waiver_type: 'Course Prerequisite',
+    status: 'pending_approval',
+    created_at: '2026-06-10T09:00:00Z',
+    updated_at: '2026-06-12T14:30:00Z',
+  },
+  {
+    waiver_id: 'WVR-002',
+    email_from: 'bob.smith@university.edu',
+    department: 'Electrical Engineering',
+    waiver_type: 'Graduation Requirement',
+    status: 'pending_info',
+    created_at: '2026-06-11T10:15:00Z',
+    updated_at: '2026-06-13T08:00:00Z',
+  },
+  {
+    waiver_id: 'WVR-003',
+    email_from: 'carol.white@university.edu',
+    department: 'Mathematics',
+    waiver_type: 'Late Withdrawal',
+    status: 'approved',
+    created_at: '2026-06-08T11:00:00Z',
+    updated_at: '2026-06-09T16:45:00Z',
+  },
+  {
+    waiver_id: 'WVR-004',
+    email_from: 'dan.brown@university.edu',
+    department: 'Physics',
+    waiver_type: 'Course Prerequisite',
+    status: 'rejected',
+    created_at: '2026-06-07T08:30:00Z',
+    updated_at: '2026-06-10T12:00:00Z',
+  },
+  {
+    waiver_id: 'WVR-005',
+    email_from: 'eva.garcia@university.edu',
+    department: 'Computer Science',
+    waiver_type: 'Credit Transfer',
+    status: 'pending_approval',
+    created_at: '2026-06-13T13:00:00Z',
+    updated_at: '2026-06-14T09:20:00Z',
+  },
+  {
+    waiver_id: 'WVR-006',
+    email_from: 'frank.lee@university.edu',
+    department: 'Business',
+    waiver_type: 'Graduation Requirement',
+    status: 'pending_info',
+    created_at: '2026-06-14T10:00:00Z',
+    updated_at: '2026-06-15T11:00:00Z',
+  },
+  {
+    waiver_id: 'WVR-007',
+    email_from: 'grace.kim@university.edu',
+    department: 'Chemistry',
+    waiver_type: 'Late Withdrawal',
+    status: 'approved',
+    created_at: '2026-06-05T09:00:00Z',
+    updated_at: '2026-06-06T14:00:00Z',
+  },
+  {
+    waiver_id: 'WVR-008',
+    email_from: 'henry.nguyen@university.edu',
+    department: 'Electrical Engineering',
+    waiver_type: 'Credit Transfer',
+    status: 'pending_approval',
+    created_at: '2026-06-15T08:00:00Z',
+    updated_at: '2026-06-16T10:30:00Z',
+  },
+]
+
+export const MOCK_DETAILS: Record<string, WaiverDetail> = {
+  'WVR-001': {
+    ...MOCK_WAIVERS[0],
+    collected_info: {
+      student_id: 'CS2024001',
+      gpa: '3.8',
+      requested_course: 'CS401 Advanced Algorithms',
+      prerequisite_waived: 'CS301',
+      reason: 'Completed equivalent coursework at MIT during exchange program',
+    },
+    missing_fields: [],
+    history: [
+      { timestamp: '2026-06-10T09:00:00Z', event: 'created', content: 'Waiver request received via email' },
+      { timestamp: '2026-06-10T09:05:00Z', event: 'classified', content: 'Classified as Course Prerequisite waiver' },
+      { timestamp: '2026-06-11T10:00:00Z', event: 'info_collected', content: 'All required information collected from student' },
+      { timestamp: '2026-06-12T14:30:00Z', event: 'pending_approval', content: 'Submitted for approver review' },
+    ],
+    attachments: [
+      { filename: 'MIT_transcript.pdf', s3_presigned_url: '#' },
+      { filename: 'course_equivalency.pdf', s3_presigned_url: '#' },
+    ],
+  },
+  'WVR-002': {
+    ...MOCK_WAIVERS[1],
+    collected_info: {
+      student_id: 'EE2024042',
+      graduation_term: 'Spring 2027',
+      requirement_waived: 'EE495 Senior Design Project',
+    },
+    missing_fields: ['industry_experience_proof', 'advisor_signature'],
+    history: [
+      { timestamp: '2026-06-11T10:15:00Z', event: 'created', content: 'Waiver request received via email' },
+      { timestamp: '2026-06-11T10:20:00Z', event: 'classified', content: 'Classified as Graduation Requirement waiver' },
+      { timestamp: '2026-06-13T08:00:00Z', event: 'info_requested', content: 'Requested industry experience proof and advisor signature' },
+    ],
+    attachments: [],
+  },
+  'WVR-003': {
+    ...MOCK_WAIVERS[2],
+    collected_info: {
+      student_id: 'MA2023015',
+      course: 'MATH301 Real Analysis',
+      withdrawal_reason: 'Medical emergency — hospitalization',
+      medical_documentation: 'Provided',
+    },
+    missing_fields: [],
+    history: [
+      { timestamp: '2026-06-08T11:00:00Z', event: 'created', content: 'Waiver request received via email' },
+      { timestamp: '2026-06-08T11:05:00Z', event: 'classified', content: 'Classified as Late Withdrawal waiver' },
+      { timestamp: '2026-06-09T09:00:00Z', event: 'info_collected', content: 'Medical documentation verified' },
+      { timestamp: '2026-06-09T16:45:00Z', event: 'approved', content: 'Approved by Dean of Students. Comment: Medical documentation confirmed.' },
+    ],
+    attachments: [
+      { filename: 'medical_certificate.pdf', s3_presigned_url: '#' },
+    ],
+  },
+  'WVR-004': {
+    ...MOCK_WAIVERS[3],
+    collected_info: {
+      student_id: 'PH2024008',
+      requested_course: 'PHYS402 Quantum Mechanics II',
+      prerequisite_waived: 'PHYS301',
+    },
+    missing_fields: [],
+    history: [
+      { timestamp: '2026-06-07T08:30:00Z', event: 'created', content: 'Waiver request received via email' },
+      { timestamp: '2026-06-07T08:35:00Z', event: 'classified', content: 'Classified as Course Prerequisite waiver' },
+      { timestamp: '2026-06-10T12:00:00Z', event: 'rejected', content: 'Rejected. Comment: Prerequisite grade requirement not met (C+ required, student received C-).' },
+    ],
+    attachments: [],
+  },
+  'WVR-005': {
+    ...MOCK_WAIVERS[4],
+    collected_info: {
+      student_id: 'CS2025012',
+      transfer_institution: 'Stanford University',
+      credits_requested: '12',
+      courses: 'CS101, CS201, CS202',
+    },
+    missing_fields: [],
+    history: [
+      { timestamp: '2026-06-13T13:00:00Z', event: 'created', content: 'Waiver request received via email' },
+      { timestamp: '2026-06-13T13:10:00Z', event: 'classified', content: 'Classified as Credit Transfer waiver' },
+      { timestamp: '2026-06-14T09:20:00Z', event: 'pending_approval', content: 'All documents verified, submitted for review' },
+    ],
+    attachments: [
+      { filename: 'stanford_transcript.pdf', s3_presigned_url: '#' },
+    ],
+  },
+  'WVR-006': { ...MOCK_WAIVERS[5], collected_info: {}, missing_fields: ['official_transcript', 'department_approval'], history: [{ timestamp: '2026-06-14T10:00:00Z', event: 'created', content: 'Waiver request received' }, { timestamp: '2026-06-15T11:00:00Z', event: 'info_requested', content: 'Awaiting official transcript and department approval form' }], attachments: [] },
+  'WVR-007': { ...MOCK_WAIVERS[6], collected_info: { student_id: 'CH2023022', course: 'CHEM301', withdrawal_reason: 'Family emergency' }, missing_fields: [], history: [{ timestamp: '2026-06-05T09:00:00Z', event: 'created', content: 'Waiver received' }, { timestamp: '2026-06-06T14:00:00Z', event: 'approved', content: 'Approved after documentation review' }], attachments: [{ filename: 'supporting_document.pdf', s3_presigned_url: '#' }] },
+  'WVR-008': { ...MOCK_WAIVERS[7], collected_info: { student_id: 'EE2025033', transfer_from: 'UC Berkeley', credits: '9' }, missing_fields: [], history: [{ timestamp: '2026-06-15T08:00:00Z', event: 'created', content: 'Waiver received' }, { timestamp: '2026-06-16T10:30:00Z', event: 'pending_approval', content: 'Ready for review' }], attachments: [{ filename: 'berkeley_transcript.pdf', s3_presigned_url: '#' }] },
+}
