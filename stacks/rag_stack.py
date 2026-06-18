@@ -8,21 +8,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 import json
-import re
 import boto3
-
-
-def _deployer_arn() -> str | None:
-    """Return the IAM ARN of whoever is running cdk deploy, normalised to a
-    role ARN so AOSS accepts it as a data-access policy principal."""
-    try:
-        arn = boto3.client("sts").get_caller_identity()["Arn"]
-        m = re.match(r"arn:aws:sts::(\d+):assumed-role/([^/]+)/", arn)
-        if m:
-            return f"arn:aws:iam::{m.group(1)}:role/{m.group(2)}"
-        return arn
-    except Exception:
-        return None
 
 
 class RagStack(cdk.Stack):
@@ -101,10 +87,13 @@ class RagStack(cdk.Stack):
         # ------------------------------------------------------------------ #
 
         account_id = boto3.client("sts").get_caller_identity()["Account"]
-        principals = [f"arn:aws:iam::{account_id}:role/{_kb_role_name}"]
-        deployer = _deployer_arn()
-        if deployer:
-            principals.append(deployer)
+        region = boto3.client("sts").meta.region_name or "eu-west-1"
+        # CFN execution role is what CfnIndex uses to call the AOSS API
+        cfn_exec_role = f"arn:aws:iam::{account_id}:role/cdk-hnb659fds-cfn-exec-role-{account_id}-{region}"
+        principals = [
+            f"arn:aws:iam::{account_id}:role/{_kb_role_name}",
+            cfn_exec_role,
+        ]
 
         data_access_policy = oss.CfnAccessPolicy(
             self, "OSSDataAccessPolicy",
