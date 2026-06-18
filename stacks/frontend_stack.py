@@ -1,3 +1,5 @@
+import os
+
 import aws_cdk as cdk
 from aws_cdk import (
     aws_cognito as cognito,
@@ -192,14 +194,18 @@ class FrontendStack(cdk.Stack):
             default_root_object="index.html",
         )
 
-        # Deploy React build to S3 and invalidate CloudFront cache
-        s3deploy.BucketDeployment(
-            self, "DeployReactApp",
-            sources=[s3deploy.Source.asset("frontend/dist")],
-            destination_bucket=spa_bucket,
-            distribution=distribution,
-            distribution_paths=["/*"],
-        )
+        # Deploy React build to S3 and invalidate CloudFront cache.
+        # Guarded so a missing build (frontend/dist) doesn't break synth/deploy
+        # for the whole app — the upload kicks in automatically once Person 5
+        # has run `npm run build`. (Person 5: this guard is intentional.)
+        if os.path.isdir("frontend/dist"):
+            s3deploy.BucketDeployment(
+                self, "DeployReactApp",
+                sources=[s3deploy.Source.asset("frontend/dist")],
+                destination_bucket=spa_bucket,
+                distribution=distribution,
+                distribution_paths=["/*"],
+            )
 
         # ------------------------------------------------------------------ #
         # OUTPUTS
