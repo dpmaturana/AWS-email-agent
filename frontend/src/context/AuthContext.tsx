@@ -46,9 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     try {
       if (USE_COGNITO) {
-        await amplifySignIn({ username: email, password })
+        await amplifySignIn({
+          username: email,
+          password,
+          options: { authFlowType: 'USER_PASSWORD_AUTH' },
+        })
         const u = await getCurrentUser()
-        setUser({ email: u.signInDetails?.loginId ?? u.username })
+        setUser({ email: u.signInDetails?.loginId ?? email })
       } else {
         await new Promise(r => setTimeout(r, 600))
         if (email !== MOCK_CREDENTIALS.email || password !== MOCK_CREDENTIALS.password) {

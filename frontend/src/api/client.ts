@@ -2,7 +2,9 @@ import type { DecideBody, WaiverDetail, WaiverListResponse } from '../types/waiv
 import { MOCK_DETAILS, MOCK_WAIVERS } from './mock'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
-const USE_MOCK = !API_BASE  // automatically uses real API when VITE_API_URL is set
+// Keep mock ON until Person 4's DynamoDB table has real data.
+// Flip to: const USE_MOCK = !API_BASE   when Person 4 is deployed.
+const USE_MOCK = true
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('id_token') ?? ''

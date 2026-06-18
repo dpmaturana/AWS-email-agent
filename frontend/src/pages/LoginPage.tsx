@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
@@ -14,14 +14,17 @@ export function LoginPage() {
     return null
   }
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
     try {
       await signIn(email, password)
       navigate('/', { replace: true })
-    } catch {
-      setError('Invalid email or password. Please try again.')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Sign in failed'
+      setError(msg.includes('Incorrect') || msg.includes('incorrect') || msg.includes('password')
+        ? 'Incorrect email or password.'
+        : msg)
     }
   }
 
@@ -83,7 +86,7 @@ export function LoginPage() {
           </form>
 
           <p className="text-center text-xs text-gray-400 mt-6">
-            Dev credentials: approver@university.edu / Admin1234!
+            approver@university.edu / Waiver2024!
           </p>
         </div>
       </div>
