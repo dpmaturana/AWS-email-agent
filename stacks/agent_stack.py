@@ -25,13 +25,7 @@ class AgentStack(cdk.Stack):
             sensitive_information_policy_config=bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(
                 pii_entities_config=[
                     bedrock.CfnGuardrail.PiiEntityConfigProperty(
-                        type="SSN", action="BLOCK"
-                    ),
-                    bedrock.CfnGuardrail.PiiEntityConfigProperty(
                         type="CREDIT_DEBIT_CARD_NUMBER", action="BLOCK"
-                    ),
-                    bedrock.CfnGuardrail.PiiEntityConfigProperty(
-                        type="PASSPORT_NUMBER", action="ANONYMIZE"
                     ),
                     bedrock.CfnGuardrail.PiiEntityConfigProperty(
                         type="EMAIL", action="ANONYMIZE"
