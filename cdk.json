@@ -18,6 +18,7 @@
     "email_demo_recipient": "lukafraer@gmail.com",
     "approver_email": "shuli269594@gmail.com",
     "manage_ses_identities": false,
+    "inbound_domain": "emailwaiver.xyz",
     "router_agent_id_param": "/email-agent/router/agent-id",
     "router_agent_alias_param": "/email-agent/router/agent-alias-id"
   }

@@ -1,6 +1,7 @@
 import aws_cdk as cdk
 from aws_cdk import (
     aws_s3 as s3,
+    aws_s3_notifications as s3n,
     aws_ses as ses,
     aws_ses_actions as ses_actions,
     aws_lambda as lambda_,
@@ -141,6 +142,52 @@ class InfraStack(cdk.Stack):
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )
+
+        # ------------------------------------------------------------------ #
+        # S3 TRIGGER — auto-invoke ingestion when a raw email lands in the bucket
+        # ------------------------------------------------------------------ #
+        # Single entry point for BOTH simulated and real inbound:
+        #   * simulated: drop an .eml under incoming/ manually
+        #   * real (domain): the SES receipt rule below writes incoming/<msgId>
+        # Scoped to the incoming/ prefix so the attachments the Lambda writes
+        # back (under attachments/) do NOT re-trigger it — that would loop.
+        # No suffix filter: SES-stored objects are keyed by message id (no .eml).
+        self.raw_emails_bucket.add_event_notification(
+            s3.EventType.OBJECT_CREATED,
+            s3n.LambdaDestination(self.ingestion_lambda),
+            s3.NotificationKeyFilter(prefix="incoming/"),
+        )
+
+        # ------------------------------------------------------------------ #
+        # SES INBOUND (optional) — real email receiving via a verified domain
+        # ------------------------------------------------------------------ #
+        # Enabled only when context "inbound_domain" is set (e.g. "myteam.click").
+        # Requires: domain registered + verified in SES, MX record pointing to
+        # SES, and the rule set activated (see docs/inbound-email-setup.md).
+        # The rule uses an S3 action ONLY (no Lambda action): SES writes the raw
+        # email to incoming/, which fires the S3 trigger above. Using both would
+        # double-invoke the Lambda.
+        inbound_domain = self.node.try_get_context("inbound_domain")
+        if inbound_domain:
+            rule_set = ses.ReceiptRuleSet(
+                self, "InboundRuleSet",
+                receipt_rule_set_name="email-agent-inbound",
+            )
+            rule_set.add_rule(
+                "StoreInboundToS3",
+                recipients=[inbound_domain],  # any address @inbound_domain
+                actions=[
+                    ses_actions.S3(
+                        bucket=self.raw_emails_bucket,
+                        object_key_prefix="incoming/",
+                    )
+                ],
+                scan_enabled=True,
+            )
+            cdk.CfnOutput(self, "InboundRuleSetName",
+                value="email-agent-inbound",
+                export_name="InboundRuleSetName",
+            )
 
         # ------------------------------------------------------------------ #
         # OUTPUTS
