@@ -4,6 +4,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_bedrock as bedrock,
+    aws_ssm as ssm,
 )
 from constructs import Construct
 
@@ -170,14 +171,23 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
         )
 
         # ------------------------------------------------------------------ #
-        # WIRE AGENT IDs INTO INGESTION LAMBDA
+        # PUBLISH AGENT IDs FOR THE INGESTION LAMBDA
+        # Published to SSM (by convention name) rather than injected directly
+        # into the ingestion Lambda's environment. Mutating InfraStack's Lambda
+        # from here would make InfraStack depend on AgentStack and create a
+        # cyclic stack reference (InfraStack -> AgentStack -> RagStack ->
+        # InfraStack). The ingestion Lambda reads these parameters at runtime.
         # ------------------------------------------------------------------ #
 
-        infra.ingestion_lambda.add_environment(
-            "AGENT_CORE_ROUTER_ID", self.router_agent.attr_agent_id
+        ssm.StringParameter(
+            self, "RouterAgentIdParam",
+            parameter_name=self.node.try_get_context("router_agent_id_param"),
+            string_value=self.router_agent.attr_agent_id,
         )
-        infra.ingestion_lambda.add_environment(
-            "AGENT_CORE_ROUTER_ALIAS", router_alias.attr_agent_alias_id
+        ssm.StringParameter(
+            self, "RouterAgentAliasParam",
+            parameter_name=self.node.try_get_context("router_agent_alias_param"),
+            string_value=router_alias.attr_agent_alias_id,
         )
 
         # ------------------------------------------------------------------ #

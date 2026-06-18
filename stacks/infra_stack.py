@@ -49,16 +49,23 @@ class InfraStack(cdk.Stack):
         # ------------------------------------------------------------------ #
         # SES — verified email identities (sandbox mode, no domain needed)
         # ------------------------------------------------------------------ #
+        # Set context "manage_ses_identities": false when the addresses are
+        # already verified / owned by another stack in the account (an
+        # AWS::SES::EmailIdentity cannot be owned by two stacks at once).
+        manage_ses_identities = self.node.try_get_context("manage_ses_identities")
+        if manage_ses_identities is None:
+            manage_ses_identities = True
 
-        ses.CfnEmailIdentity(
-            self, "SenderIdentity",
-            email_identity=email_from,
-        )
+        if manage_ses_identities:
+            ses.CfnEmailIdentity(
+                self, "SenderIdentity",
+                email_identity=email_from,
+            )
 
-        ses.CfnEmailIdentity(
-            self, "RecipientIdentity",
-            email_identity=email_demo_recipient,
-        )
+            ses.CfnEmailIdentity(
+                self, "RecipientIdentity",
+                email_identity=email_demo_recipient,
+            )
 
         # ------------------------------------------------------------------ #
         # INGESTION LAMBDA
@@ -75,7 +82,44 @@ class InfraStack(cdk.Stack):
             ],
         )
 
-        self.raw_emails_bucket.grant_read(ingestion_role)
+        # Read the raw .eml + write extracted attachments back under attachments/.
+        self.raw_emails_bucket.grant_read_write(ingestion_role)
+
+        # Thread detection reads Person 4's DynamoDB `waivers` table via the
+        # message_id GSI. The table name + index are part of the team contract
+        # (see stacks/waiver_stack.py); referenced by name to avoid a circular
+        # stack dependency (WaiverStack already depends on InfraStack).
+        waiver_table_name = self.node.try_get_context("waiver_table_name") or "waivers"
+        waiver_message_id_index = "message_id_index"
+        waiver_table_arn = (
+            f"arn:aws:dynamodb:{self.region}:{self.account}:table/{waiver_table_name}"
+        )
+        ingestion_role.add_to_policy(iam.PolicyStatement(
+            actions=["dynamodb:Query", "dynamodb:GetItem"],
+            resources=[waiver_table_arn, f"{waiver_table_arn}/index/*"],
+        ))
+
+        # Invoke the Bedrock router agent. The concrete agent ARN is unknown at
+        # InfraStack synth time (created later in AgentStack), so scope to any
+        # agent alias in this account/region.
+        ingestion_role.add_to_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeAgent"],
+            resources=[
+                f"arn:aws:bedrock:{self.region}:{self.account}:agent-alias/*",
+            ],
+        ))
+
+        # The router agent id/alias are published to SSM by AgentStack (decoupled
+        # to avoid a cyclic stack dependency). Read them by convention name.
+        router_id_param = self.node.try_get_context("router_agent_id_param")
+        router_alias_param = self.node.try_get_context("router_agent_alias_param")
+        ingestion_role.add_to_policy(iam.PolicyStatement(
+            actions=["ssm:GetParameter"],
+            resources=[
+                f"arn:aws:ssm:{self.region}:{self.account}:parameter{router_id_param}",
+                f"arn:aws:ssm:{self.region}:{self.account}:parameter{router_alias_param}",
+            ],
+        ))
 
         self.ingestion_lambda = lambda_.Function(
             self, "IngestionLambda",
@@ -83,12 +127,17 @@ class InfraStack(cdk.Stack):
             handler="handler.handler",
             code=lambda_.Code.from_asset("lambdas/ingestion"),
             role=ingestion_role,
-            timeout=cdk.Duration.seconds(30),
+            timeout=cdk.Duration.seconds(60),
             environment={
                 "EMAIL_FROM": email_from,
                 "EMAIL_DEMO_RECIPIENT": email_demo_recipient,
                 "RAW_EMAILS_BUCKET": self.raw_emails_bucket.bucket_name,
-                # AGENT_CORE_AGENT_ID and AGENT_CORE_ALIAS_ID injected by AgentStack
+                "WAIVER_TABLE_NAME": waiver_table_name,
+                "WAIVER_MESSAGE_ID_INDEX": waiver_message_id_index,
+                # Router agent id/alias are resolved at runtime from these SSM
+                # parameters (published by AgentStack after it deploys).
+                "ROUTER_AGENT_ID_PARAM": router_id_param,
+                "ROUTER_AGENT_ALIAS_PARAM": router_alias_param,
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )

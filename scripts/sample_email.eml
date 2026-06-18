@@ -1,0 +1,24 @@
+Message-ID: <new-thread-001@demo.example.com>
+Date: Wed, 18 Jun 2026 09:30:00 +0000
+From: Jane Employee <jane@demo.example.com>
+To: agent@demo.example.com
+Subject: Request for travel waiver
+Content-Type: multipart/mixed; boundary="BOUNDARY42"
+
+--BOUNDARY42
+Content-Type: text/plain; charset="utf-8"
+
+Hello,
+
+I would like to request a waiver for international travel next month.
+Please let me know what documents you need from me.
+
+Thanks,
+Jane
+
+--BOUNDARY42
+Content-Type: text/plain; name="itinerary.txt"
+Content-Disposition: attachment; filename="itinerary.txt"
+
+Flight LH123 - 2026-07-10 - LHR to JFK
+--BOUNDARY42--

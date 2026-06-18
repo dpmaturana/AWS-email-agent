@@ -1,0 +1,23 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# CDK
+cdk.out/
+*.swp
+.cdk.staging/
+
+# AWS / local
+.env
+scripts/_payload.json
+scripts/_response.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
