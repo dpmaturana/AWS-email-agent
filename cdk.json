@@ -1,5 +1,5 @@
 {
-  "app": "python3 app.py",
+  "app": "python app.py",
   "watch": {
     "include": ["**"],
     "exclude": [
@@ -14,8 +14,11 @@
   "context": {
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:stackRelativeExports": true,
-    "email_from": "your-verified-sender@gmail.com",
-    "email_demo_recipient": "your-verified-recipient@gmail.com",
-    "approver_email": "approver@gmail.com"
+    "email_from": "sulankovski02@gmail.com",
+    "email_demo_recipient": "lukafraer@gmail.com",
+    "approver_email": "shuli269594@gmail.com",
+    "manage_ses_identities": false,
+    "router_agent_id_param": "/email-agent/router/agent-id",
+    "router_agent_alias_param": "/email-agent/router/agent-alias-id"
   }
 }

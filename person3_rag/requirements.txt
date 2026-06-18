@@ -1,0 +1,5 @@
+# CDK app dependencies for RagStack (Person 3).
+# Lambda runtimes use only boto3/botocore, which are bundled in the AWS Lambda
+# Python 3.12 runtime — no extra Lambda layer or Docker bundling required.
+aws-cdk-lib>=2.150.0,<3.0.0
+constructs>=10.0.0,<11.0.0

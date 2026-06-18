@@ -1,0 +1,8 @@
+{
+  "app": "python3 app.py",
+  "context": {
+    "@aws-cdk/core:newStyleStackSynthesis": true,
+    "documentsBucketName": "",
+    "embeddingModelId": "amazon.titan-embed-text-v2:0"
+  }
+}
