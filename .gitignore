@@ -3,6 +3,7 @@
 venv/
 __pycache__/
 *.py[cod]
+*.pyo
 *.egg-info/
 .pytest_cache/
 
@@ -11,12 +12,16 @@ cdk.out/
 *.swp
 .cdk.staging/
 
-# Node / frontend
+# Node / React
 node_modules/
+frontend/node_modules/
+frontend/dist/
 frontend/build/
 
-# AWS / local
+# Environment secrets
 .env
+frontend/.env.local
+frontend/.env
 scripts/_payload.json
 scripts/_response.json
 
