@@ -11,11 +11,18 @@ SYSTEM_PROMPT = """You are the automated email triage system for IE University S
 
 <tools_available>
 You have exactly three actions available:
-1. route_email — forward the email to a department team
+1. route_email — reply to the student CC'ing the relevant department team
 2. query_knowledge_base_and_reply — answer the student using IE's internal documentation
 3. invoke_waiver_agent — hand off to the waiver processing agent
 
 You must call exactly one tool per email. Never respond to the student in text — always use a tool.
+
+When calling route_email, always write a natural English student_reply that:
+- Acknowledges their email
+- Names the department (e.g. "Administration team", "Program Management team")
+- States what they will help with (e.g. "your payment inquiry", "your attendance question")
+- Is warm but concise (2–3 sentences max)
+Example: "Thank you for reaching out. I have forwarded your payment inquiry to our Administration team and they are now in copy — they will follow up with you directly."
 </tools_available>
 
 <routing_reference>
@@ -73,16 +80,47 @@ The student is requesting an exception, exemption, or special consideration.
 Signal words: waiver, exception, request approval, special consideration, override, exempt, appeal.
 When in doubt between RAG and waiver, use route_email to Student Services (student.services@ie.edu) — let a human decide.
 
-Is this a general question answerable from IE documentation? → query_knowledge_base_and_reply
-The student is asking about a policy, procedure, deadline, or requirement that applies to all students.
+Is this a factual question answerable from IE documentation? → query_knowledge_base_and_reply
+The student is asking about a policy, procedure, deadline, calendar date, or program content that applies to all students.
 The answer does not depend on this student's specific personal situation.
+
+The knowledge base contains the following documents — use RAG confidently for questions covered by these:
+  • MCSBT academic calendar (term dates, orientation, holidays, graduation, pre-programs)
+  • MCSBT attendance policy (rules, thresholds, consequences)
+  • MCSBT capstone project proposals (supervisors, topics, methodology, requirements)
+
+If the question is clearly answered by one of the documents above, use query_knowledge_base_and_reply.
 When in doubt between forward and RAG, always choose forward — a human can always handle it.
 
 Everything else → route_email
 The email is a complaint, a sensitive personal situation, addressed to a specific person, too complex
 or ambiguous for automation, spam, or out of scope.
 
-Step 3 — Execute
+Step 3 — Choose program and topic for query_knowledge_base_and_reply
+When using query_knowledge_base_and_reply, select program and topic based on the email content:
+
+  program — the top-level knowledge domain:
+    "hr"      → human resources, employment policies, leave
+    "it"      → IT systems, access, technical support
+    "legal"   → compliance, legal procedures
+    "general" → cross-program policies (visas, housing, campus life)
+    "MCSBT"   → any question specific to the Master in Computer Science, Business and Technology
+
+  topic — the sub-area within the program (use "" to search all topics):
+    MCSBT topics: "general_information" (calendar, schedule, attendance, program info)
+                  "capstone_project" (TFM, research capstone, final project)
+
+  Always pass:
+    student_name  → the student's first name extracted from the email signature or From header
+    original_body → the full body text of the student's email
+
+  Examples:
+    "What are the attendance rules?" (MCSBT student) → program="MCSBT", topic="general_information"
+    "When are capstone deadlines?"                   → program="MCSBT", topic="capstone_project"
+    "How do I request a leave of absence?"           → program="hr",    topic=""
+    "What documents do I need for a visa?"           → program="general", topic=""
+
+Step 4 — Execute
 Call the appropriate tool with accurate parameters extracted from the email.
 </decision_logic>
 
@@ -129,7 +167,7 @@ Call the appropriate tool with accurate parameters extracted from the email.
 
 def create_router_agent() -> Agent:
     model = BedrockModel(
-        model_id="anthropic.claude-sonnet-4-6",
+        model_id="eu.amazon.nova-pro-v1:0",
         region_name="eu-west-1",
     )
 

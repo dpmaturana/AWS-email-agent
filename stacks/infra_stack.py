@@ -93,33 +93,27 @@ class InfraStack(cdk.Stack):
         # stack dependency (WaiverStack already depends on InfraStack).
         waiver_table_name = self.node.try_get_context("waiver_table_name") or "waivers"
         waiver_message_id_index = "message_id_index"
-        waiver_table_arn = (
-            f"arn:aws:dynamodb:{self.region}:{self.account}:table/{waiver_table_name}"
-        )
+        waiver_table_arn = f"arn:aws:dynamodb:{self.region}:{self.account}:table/{waiver_table_name}"
         ingestion_role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:Query", "dynamodb:GetItem"],
             resources=[waiver_table_arn, f"{waiver_table_arn}/index/*"],
         ))
 
-        # Invoke the Bedrock router agent. The concrete agent ARN is unknown at
-        # InfraStack synth time (created later in AgentStack), so scope to any
-        # agent alias in this account/region.
+        # Invoke the Strands router Lambda (deployed by AgentStack). The ARN is
+        # unknown at InfraStack synth time, so we scope to the function name.
         ingestion_role.add_to_policy(iam.PolicyStatement(
-            actions=["bedrock:InvokeAgent"],
+            actions=["lambda:InvokeFunction"],
             resources=[
-                f"arn:aws:bedrock:{self.region}:{self.account}:agent-alias/*",
+                f"arn:aws:lambda:{self.region}:{self.account}:function:email-agent-router",
             ],
         ))
 
-        # The router agent id/alias are published to SSM by AgentStack (decoupled
-        # to avoid a cyclic stack dependency). Read them by convention name.
-        router_id_param = self.node.try_get_context("router_agent_id_param")
-        router_alias_param = self.node.try_get_context("router_agent_alias_param")
+        # The router Lambda ARN is published to SSM by AgentStack so it can be
+        # resolved at runtime without a cyclic stack dependency.
         ingestion_role.add_to_policy(iam.PolicyStatement(
             actions=["ssm:GetParameter"],
             resources=[
-                f"arn:aws:ssm:{self.region}:{self.account}:parameter{router_id_param}",
-                f"arn:aws:ssm:{self.region}:{self.account}:parameter{router_alias_param}",
+                f"arn:aws:ssm:{self.region}:{self.account}:parameter/email-agent/router/lambda-arn",
             ],
         ))
 
@@ -129,17 +123,15 @@ class InfraStack(cdk.Stack):
             handler="handler.handler",
             code=lambda_.Code.from_asset("lambdas/ingestion"),
             role=ingestion_role,
-            timeout=cdk.Duration.seconds(60),
+            timeout=cdk.Duration.seconds(330),
             environment={
                 "EMAIL_FROM": email_from,
                 "EMAIL_DEMO_RECIPIENT": email_demo_recipient,
                 "RAW_EMAILS_BUCKET": self.raw_emails_bucket.bucket_name,
                 "WAIVER_TABLE_NAME": waiver_table_name,
                 "WAIVER_MESSAGE_ID_INDEX": waiver_message_id_index,
-                # Router agent id/alias are resolved at runtime from these SSM
-                # parameters (published by AgentStack after it deploys).
-                "ROUTER_AGENT_ID_PARAM": router_id_param,
-                "ROUTER_AGENT_ALIAS_PARAM": router_alias_param,
+                # Router Lambda ARN resolved at runtime from SSM (published by AgentStack).
+                "ROUTER_LAMBDA_ARN_PARAM": "/email-agent/router/lambda-arn",
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )

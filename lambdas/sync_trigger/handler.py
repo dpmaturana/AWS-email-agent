@@ -44,15 +44,20 @@ def handler(event, _context):
     if key.endswith(METADATA_SUFFIX):
         return {"skipped": "metadata sidecar"}
 
-    department = key.split("/", 1)[0] if "/" in key else None
+    segments = [s for s in key.split("/") if s]
+    department = segments[0] if segments else None
     if department not in DATA_SOURCE_IDS:
         print(f"Key {key!r} not under a known department prefix; skipping.")
         return {"skipped": f"unknown department for key {key}"}
 
-    # 1. Write the department metadata sidecar next to the object.
+    # Sub-folder becomes the topic (e.g. MCSBT/capstone_project/file.pdf → capstone_project).
+    # Flat docs (dept/file.pdf) default to "general".
+    topic = segments[1] if len(segments) > 2 else "general"
+
+    # 1. Write the metadata sidecar next to the object.
     sidecar_key = f"{key}{METADATA_SUFFIX}"
     sidecar_body = json.dumps(
-        {"metadataAttributes": {"department": department}}
+        {"metadataAttributes": {"program": department, "topic": topic}}
     ).encode("utf-8")
     _s3.put_object(
         Bucket=bucket,

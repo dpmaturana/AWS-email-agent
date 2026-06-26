@@ -226,12 +226,14 @@ class RagStack(cdk.Stack):
         )
         self.knowledge_base.add_dependency(oss_index)
 
-        # Data source per department — capture IDs for the sync trigger Lambda
+        # Data source per department/program — capture IDs for the sync trigger Lambda.
+        # Add new programs here as top-level keys; each gets its own S3 prefix and
+        # Bedrock data source so ingestion jobs can be scoped per program/dept.
         data_source_refs: dict[str, bedrock.CfnDataSource] = {}
-        for dept in ["hr", "legal", "it", "general"]:
+        for dept in ["hr", "legal", "it", "general", "MCSBT"]:
             ds = bedrock.CfnDataSource(
                 self, f"DataSource{dept.upper()}",
-                name=f"email-agent-{dept}",
+                name=f"email-agent-{dept.lower()}",
                 knowledge_base_id=self.knowledge_base.attr_knowledge_base_id,
                 data_source_configuration=bedrock.CfnDataSource.DataSourceConfigurationProperty(
                     type="S3",
@@ -252,12 +254,13 @@ class RagStack(cdk.Stack):
             )
             data_source_refs[dept] = ds
 
-        # JSON map of dept → data_source_id resolved at deploy time via Fn.join
+        # JSON map of dept/program → data_source_id resolved at deploy time via Fn.join
         data_source_ids_json = cdk.Fn.join("", [
             '{"hr":"',      data_source_refs["hr"].attr_data_source_id,
             '","legal":"',  data_source_refs["legal"].attr_data_source_id,
             '","it":"',     data_source_refs["it"].attr_data_source_id,
             '","general":"',data_source_refs["general"].attr_data_source_id,
+            '","MCSBT":"',  data_source_refs["MCSBT"].attr_data_source_id,
             '"}',
         ])
 

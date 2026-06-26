@@ -1,17 +1,16 @@
 """
-query_knowledge_base tool implementation (Person 3).
+query_knowledge_base tool implementation.
 
-Person 2's Strands agent calls a `@tool query_knowledge_base(...)` whose body
-invokes THIS Lambda. We use the Bedrock `Retrieve` API (not RetrieveAndGenerate)
-because the tool contract returns raw chunks — the agent does the generation
-itself. Retrieval is scoped to a single department via a metadata filter so HR
-docs never surface in an IT answer.
+Retrieves chunks from the Bedrock Knowledge Base scoped by program and
+optionally topic, so content from different programs/departments never
+bleeds into unrelated answers.
 
-Event (matches the tool contract):
+Event:
 {
-  "query": "how many vacation days do I get",
-  "department": "hr",          # hr | legal | it | general
-  "top_k": 5                    # optional, default 5
+  "query":   "what are the capstone deadlines",
+  "program": "MCSBT",           # top-level folder (required)
+  "topic":   "capstone_project", # sub-folder (optional — omit to search all topics)
+  "top_k":   5                   # optional, default 5
 }
 
 Returns:
@@ -23,22 +22,30 @@ import os
 import boto3
 
 KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
-VALID_DEPARTMENTS = {"hr", "legal", "it", "general"}
 
 _client = boto3.client("bedrock-agent-runtime")
 
 
 def handler(event, _context):
-    query = (event or {}).get("query")
-    department = (event or {}).get("department")
-    top_k = int((event or {}).get("top_k", 5))
+    query   = (event or {}).get("query")
+    program = (event or {}).get("program")
+    topic   = (event or {}).get("topic") or None
+    top_k   = int((event or {}).get("top_k", 5))
 
     if not query or not isinstance(query, str):
         raise ValueError("`query` is required and must be a string")
-    if department not in VALID_DEPARTMENTS:
-        raise ValueError(
-            f"`department` must be one of {sorted(VALID_DEPARTMENTS)}, got {department!r}"
-        )
+    if not program or not isinstance(program, str):
+        raise ValueError("`program` is required and must be a string")
+
+    if topic:
+        metadata_filter = {
+            "andAll": [
+                {"equals": {"key": "program", "value": program}},
+                {"equals": {"key": "topic",   "value": topic}},
+            ]
+        }
+    else:
+        metadata_filter = {"equals": {"key": "program", "value": program}}
 
     response = _client.retrieve(
         knowledgeBaseId=KNOWLEDGE_BASE_ID,
@@ -46,8 +53,7 @@ def handler(event, _context):
         retrievalConfiguration={
             "vectorSearchConfiguration": {
                 "numberOfResults": top_k,
-                # Metadata filter — only chunks tagged with this department.
-                "filter": {"equals": {"key": "department", "value": department}},
+                "filter": metadata_filter,
             }
         },
     )
@@ -63,8 +69,8 @@ def handler(event, _context):
         results.append(
             {
                 "content": item.get("content", {}).get("text", ""),
-                "source": source,
-                "score": item.get("score", 0.0),
+                "source":  source,
+                "score":   item.get("score", 0.0),
             }
         )
     return results

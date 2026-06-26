@@ -65,8 +65,11 @@ class AgentStack(cdk.Stack):
             inline_policies={
                 "AgentPolicy": iam.PolicyDocument(statements=[
                     iam.PolicyStatement(
-                        actions=["bedrock:InvokeModel"],
-                        resources=["arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6"],
+                        actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                        resources=[
+                            "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6",
+                            "arn:aws:bedrock:eu-west-1::foundation-model/eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        ],
                     ),
                     iam.PolicyStatement(
                         actions=["bedrock:ApplyGuardrail"],
@@ -112,7 +115,7 @@ Never share PII from one user with another."""
             self, "RouterAgent",
             agent_name="email-router-agent",
             agent_resource_role_arn=agent_role.role_arn,
-            foundation_model="anthropic.claude-sonnet-4-6",
+            foundation_model="eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
             instruction=router_system_prompt,
             guardrail_configuration=bedrock.CfnAgent.GuardrailConfigurationProperty(
                 guardrail_identifier=self.guardrail.attr_guardrail_id,
@@ -148,7 +151,7 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
             self, "WaiverAgent",
             agent_name="waiver-processor-agent",
             agent_resource_role_arn=agent_role.role_arn,
-            foundation_model="anthropic.claude-sonnet-4-6",
+            foundation_model="eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
             instruction=waiver_system_prompt,
             guardrail_configuration=bedrock.CfnAgent.GuardrailConfigurationProperty(
                 guardrail_identifier=self.guardrail.attr_guardrail_id,
@@ -158,7 +161,7 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
             # Person 2: add action groups here once tool Lambdas are defined
         )
 
-        waiver_alias = bedrock.CfnAgentAlias(
+        _waiver_alias = bedrock.CfnAgentAlias(
             self, "WaiverAgentAlias",
             agent_id=self.waiver_agent.attr_agent_id,
             agent_alias_name="live",
@@ -182,6 +185,143 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
             self, "RouterAgentAliasParam",
             parameter_name=self.node.try_get_context("router_agent_alias_param"),
             string_value=router_alias.attr_agent_alias_id,
+        )
+
+        # ------------------------------------------------------------------ #
+        # STRANDS AGENTS — Lambda-hosted (the actual agentic logic)
+        # ------------------------------------------------------------------ #
+
+        email_from = self.node.try_get_context("email_from")
+
+        strands_layer = lambda_.LayerVersion(
+            self, "StrandsAgentsLayer",
+            code=lambda_.Code.from_asset("layers/strands"),
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_12],
+            description="strands-agents library",
+        )
+
+        # Waiver Agent Lambda — processes waiver requests end-to-end
+        waiver_agent_role = iam.Role(
+            self, "WaiverAgentLambdaRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AWSLambdaBasicExecutionRole"
+                )
+            ],
+            inline_policies={
+                "WaiverAgentPolicy": iam.PolicyDocument(statements=[
+                    iam.PolicyStatement(
+                        actions=["ses:SendEmail", "ses:SendRawEmail"],
+                        resources=["*"],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["s3:GetObject"],
+                        resources=[f"{infra.waiver_criteria_bucket.bucket_arn}/*"],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["lambda:InvokeFunction"],
+                        resources=[
+                            waiver.start_waiver_lambda.function_arn,
+                            waiver.update_waiver_lambda.function_arn,
+                            waiver.get_waiver_lambda.function_arn,
+                        ],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                        resources=[
+                            "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0",
+                            f"arn:aws:bedrock:eu-west-1:{self.account}:inference-profile/eu.amazon.nova-pro-v1:0",
+                        ],
+                    ),
+                ])
+            },
+        )
+
+        self.waiver_agent_lambda = lambda_.Function(
+            self, "WaiverAgentLambda",
+            function_name="email-agent-waiver",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="waiver_handler.handler",
+            code=lambda_.Code.from_asset("lambdas/agents/waiver"),
+            role=waiver_agent_role,
+            layers=[strands_layer],
+            timeout=cdk.Duration.seconds(300),
+            memory_size=512,
+            environment={
+                "EMAIL_FROM":              email_from,
+                "WAIVER_CRITERIA_BUCKET":  infra.waiver_criteria_bucket.bucket_name,
+                "START_WAIVER_LAMBDA_ARN": waiver.start_waiver_lambda.function_arn,
+                "UPDATE_WAIVER_LAMBDA_ARN": waiver.update_waiver_lambda.function_arn,
+                "GET_WAIVER_LAMBDA_ARN":   waiver.get_waiver_lambda.function_arn,
+            },
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # Router Agent Lambda — classifies emails and routes them
+        router_agent_role = iam.Role(
+            self, "RouterAgentLambdaRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AWSLambdaBasicExecutionRole"
+                )
+            ],
+            inline_policies={
+                "RouterAgentPolicy": iam.PolicyDocument(statements=[
+                    iam.PolicyStatement(
+                        actions=["ses:SendEmail", "ses:SendRawEmail"],
+                        resources=["*"],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["s3:PutObject"],
+                        resources=[
+                            f"{infra.raw_emails_bucket.bucket_arn}/routed/*",
+                            f"{infra.raw_emails_bucket.bucket_arn}/responses/*",
+                        ],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["lambda:InvokeFunction"],
+                        resources=[
+                            rag.rag_lambda.function_arn,
+                            self.waiver_agent_lambda.function_arn,
+                        ],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                        resources=[
+                            "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0",
+                            f"arn:aws:bedrock:eu-west-1:{self.account}:inference-profile/eu.amazon.nova-pro-v1:0",
+                        ],
+                    ),
+                ])
+            },
+        )
+
+        self.router_lambda = lambda_.Function(
+            self, "RouterAgentLambda",
+            function_name="email-agent-router",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset("lambdas/agents/router"),
+            role=router_agent_role,
+            layers=[strands_layer],
+            timeout=cdk.Duration.seconds(300),
+            memory_size=512,
+            environment={
+                "EMAIL_FROM":              email_from,
+                "RAG_LAMBDA_ARN":          rag.rag_lambda.function_arn,
+                "WAIVER_AGENT_LAMBDA_ARN": self.waiver_agent_lambda.function_arn,
+                "RAW_EMAILS_BUCKET":       infra.raw_emails_bucket.bucket_name,
+            },
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+
+        # Publish router Lambda ARN to SSM so InfraStack can read it at runtime
+        ssm.StringParameter(
+            self, "RouterLambdaArnParam",
+            parameter_name="/email-agent/router/lambda-arn",
+            string_value=self.router_lambda.function_arn,
         )
 
         # ------------------------------------------------------------------ #

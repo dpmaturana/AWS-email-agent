@@ -15,6 +15,9 @@ cdk.out/
 node_modules/
 frontend/build/
 
+# Lambda layers (installed Python deps — rebuild with pip install)
+layers/strands/python/
+
 # AWS / local
 .env
 scripts/_payload.json

@@ -116,7 +116,7 @@ If get_waiver_state returns a status of "approved" or "rejected", call notify_de
 
 def create_waiver_agent() -> Agent:
     model = BedrockModel(
-        model_id="anthropic.claude-sonnet-4-6",
+        model_id="eu.amazon.nova-pro-v1:0",
         region_name="eu-west-1",
     )
 

@@ -31,47 +31,34 @@ from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 
 import boto3
+from botocore.exceptions import ClientError
 
 s3 = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
-_agent_runtime = boto3.client("bedrock-agent-runtime")
+_lambda_client = boto3.client("lambda")
 _ssm = boto3.client("ssm")
 
 RAW_EMAILS_BUCKET = os.environ.get("RAW_EMAILS_BUCKET", "")
 WAIVER_TABLE_NAME = os.environ.get("WAIVER_TABLE_NAME", "waivers")
 WAIVER_MESSAGE_ID_INDEX = os.environ.get("WAIVER_MESSAGE_ID_INDEX", "message_id_index")
 
-# Router agent id/alias: prefer direct env vars (handy for local tests), else
-# resolve from the SSM parameters published by AgentStack.
-ROUTER_AGENT_ID_PARAM = os.environ.get("ROUTER_AGENT_ID_PARAM", "")
-ROUTER_AGENT_ALIAS_PARAM = os.environ.get("ROUTER_AGENT_ALIAS_PARAM", "")
+ROUTER_LAMBDA_ARN_PARAM = os.environ.get("ROUTER_LAMBDA_ARN_PARAM", "/email-agent/router/lambda-arn")
 
-_agent_ids_cache = None
+_router_lambda_arn_cache = None
 
 
-def _resolve_agent_ids():
-    """Return (agent_id, agent_alias_id), cached across warm invocations."""
-    global _agent_ids_cache
-    if _agent_ids_cache is not None:
-        return _agent_ids_cache
-
-    agent_id = os.environ.get("AGENT_CORE_ROUTER_ID", "")
-    alias_id = os.environ.get("AGENT_CORE_ROUTER_ALIAS", "")
-
-    def _get_param(name):
+def _resolve_router_lambda_arn() -> str:
+    global _router_lambda_arn_cache
+    if _router_lambda_arn_cache:
+        return _router_lambda_arn_cache
+    arn = os.environ.get("ROUTER_LAMBDA_ARN", "")
+    if not arn:
         try:
-            return _ssm.get_parameter(Name=name)["Parameter"]["Value"]
+            arn = _ssm.get_parameter(Name=ROUTER_LAMBDA_ARN_PARAM)["Parameter"]["Value"]
         except Exception as exc:
-            print(f"[ingestion] could not read SSM param {name}: {exc}")
-            return ""
-
-    if not agent_id and ROUTER_AGENT_ID_PARAM:
-        agent_id = _get_param(ROUTER_AGENT_ID_PARAM)
-    if not alias_id and ROUTER_AGENT_ALIAS_PARAM:
-        alias_id = _get_param(ROUTER_AGENT_ALIAS_PARAM)
-
-    _agent_ids_cache = (agent_id, alias_id)
-    return _agent_ids_cache
+            print(f"[ingestion] could not read SSM param {ROUTER_LAMBDA_ARN_PARAM}: {exc}")
+    _router_lambda_arn_cache = arn
+    return arn
 
 
 # --------------------------------------------------------------------------- #
@@ -226,29 +213,21 @@ def _lookup_thread_id(in_reply_to):
 
 
 # --------------------------------------------------------------------------- #
-# 4. Invoke the Bedrock router agent
+# 4. Invoke the router agent Lambda (Strands agent)
 # --------------------------------------------------------------------------- #
 def _invoke_agent(payload):
-    agent_id, alias_id = _resolve_agent_ids()
-    if not (agent_id and alias_id):
-        print("[ingestion] router agent id/alias not available — skipping agent invoke.")
+    arn = _resolve_router_lambda_arn()
+    if not arn:
+        print("[ingestion] router Lambda ARN not available — skipping agent invoke.")
         return None
 
-    session_id = payload["thread_id"] or _safe_prefix(payload["message_id"])
-    response = _agent_runtime.invoke_agent(
-        agentId=agent_id,
-        agentAliasId=alias_id,
-        sessionId=session_id,
-        inputText=json.dumps(payload),
+    response = _lambda_client.invoke(
+        FunctionName=arn,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(payload).encode("utf-8"),
     )
-
-    # invoke_agent returns a streaming completion; drain it.
-    completion = ""
-    for chunk_event in response.get("completion", []):
-        chunk = chunk_event.get("chunk")
-        if chunk and chunk.get("bytes"):
-            completion += chunk["bytes"].decode("utf-8", "replace")
-    return completion
+    result = json.loads(response["Payload"].read())
+    return result.get("result") or json.dumps(result)
 
 
 # --------------------------------------------------------------------------- #
@@ -285,3 +264,5 @@ def handler(event, context):
         "source_s3_key": source_key,
         "agent_response": agent_response,
     }
+
+

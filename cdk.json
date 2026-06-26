@@ -15,7 +15,7 @@
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:stackRelativeExports": true,
     "email_from": "sulankovski02@gmail.com",
-    "email_demo_recipient": "lukafraer@gmail.com",
+    "email_demo_recipient": "dmaturanamartinez@gmail.com",
     "approver_email": "shuli269594@gmail.com",
     "manage_ses_identities": false,
     "inbound_domain": "emailwaiver.xyz",
