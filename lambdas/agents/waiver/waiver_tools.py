@@ -30,21 +30,23 @@ def get_waiver_criteria(waiver_type: str, department: str) -> dict:
     Returns:
         dict with required_fields, required_documents, approval_conditions
     """
+    generic = {
+        "required_fields": ["student_name", "student_id", "reason", "supporting_context"],
+        "required_documents": [],
+        "approval_conditions": ["Reviewed and approved by department coordinator"],
+        "note": f"No specific criteria found for {waiver_type} in {department}. Using generic criteria."
+    }
     try:
         key = f"{department}/{waiver_type}.json"
         response = s3.get_object(Bucket=WAIVER_CRITERIA_BUCKET, Key=key)
-        criteria = json.loads(response["Body"].read())
-        return criteria
-    except s3.exceptions.NoSuchKey:
-        # Fallback: return generic criteria if specific type not found
-        return {
-            "required_fields": ["student_name", "student_id", "reason", "supporting_context"],
-            "required_documents": [],
-            "approval_conditions": ["Reviewed and approved by department coordinator"],
-            "note": f"No specific criteria found for {waiver_type} in {department}. Using generic criteria."
-        }
+        return json.loads(response["Body"].read())
     except Exception as e:
-        return {"error": str(e)}
+        # Fall back to generic criteria for ANY read failure — most commonly a
+        # missing key. Note: without s3:ListBucket, S3 returns 403 AccessDenied
+        # (not 404 NoSuchKey) for absent objects, so we must not special-case
+        # NoSuchKey here or the agent stalls on an empty criteria bucket.
+        print(f"get_waiver_criteria: falling back to generic ({type(e).__name__}: {e})")
+        return generic
 
 
 @tool
