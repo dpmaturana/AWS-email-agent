@@ -110,15 +110,17 @@ class InfraStack(cdk.Stack):
 
         # The router Lambda ARN is published to SSM by AgentStack so it can be
         # resolved at runtime without a cyclic stack dependency.
+        # Both the router Lambda ARN and the router AgentCore runtime ARN are
+        # published to SSM by AgentStack (avoids a cyclic stack dependency).
         ingestion_role.add_to_policy(iam.PolicyStatement(
             actions=["ssm:GetParameter"],
             resources=[
                 f"arn:aws:ssm:{self.region}:{self.account}:parameter/email-agent/router/lambda-arn",
+                f"arn:aws:ssm:{self.region}:{self.account}:parameter/email-agent/router/runtime-arn",
             ],
         ))
 
         # Preferred path: the router agent runs on Amazon Bedrock AgentCore.
-        router_runtime_arn = self.node.try_get_context("router_agent_runtime_arn") or ""
         ingestion_role.add_to_policy(iam.PolicyStatement(
             actions=["bedrock-agentcore:InvokeAgentRuntime"],
             resources=[
@@ -139,9 +141,9 @@ class InfraStack(cdk.Stack):
                 "RAW_EMAILS_BUCKET": self.raw_emails_bucket.bucket_name,
                 "WAIVER_TABLE_NAME": waiver_table_name,
                 "WAIVER_MESSAGE_ID_INDEX": waiver_message_id_index,
-                # Router runs on AgentCore when this is set; else falls back to the
-                # router Lambda ARN resolved at runtime from SSM (published by AgentStack).
-                "ROUTER_AGENT_RUNTIME_ARN": router_runtime_arn,
+                # Router runs on AgentCore (runtime ARN resolved from SSM); falls
+                # back to the router Lambda ARN (also from SSM) if unavailable.
+                "ROUTER_RUNTIME_ARN_PARAM": "/email-agent/router/runtime-arn",
                 "ROUTER_LAMBDA_ARN_PARAM": "/email-agent/router/lambda-arn",
             },
             log_retention=logs.RetentionDays.ONE_WEEK,

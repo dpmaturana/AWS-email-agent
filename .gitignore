@@ -36,3 +36,6 @@ Thumbs.db
 Dockerfile
 .dockerignore
 .bedrock_agentcore/
+
+# AgentCore CDK code assets (rebuilt by scripts/build_agentcore_assets.sh)
+build/

@@ -84,7 +84,7 @@ The entire infrastructure is defined using **AWS CDK (Python)** organized in fiv
 - InfraStack — SES, S3 buckets, ingestion Lambda
 - RagStack — Bedrock Knowledge Base, OpenSearch Serverless, retrieval Lambda
 - WaiverStack — DynamoDB, Step Functions, waiver tool Lambdas, approval Lambda
-- AgentStack — both Strands agents (Router + Waiver) on Bedrock AgentCore (deployed via scripts/deploy_agentcore.sh); Bedrock Guardrail. Router/waiver Lambdas remain as fallbacks.
+- AgentStack — both Strands agents (Router + Waiver) on Bedrock AgentCore as CDK `CfnRuntime` constructs (code shipped as S3 assets, built by scripts/build_agentcore_assets.sh); Bedrock Guardrail. Router/waiver Lambdas remain as fallbacks.
 - FrontendStack — Cognito, API Gateway, S3 + CloudFront
 
 All stacks are account-agnostic and parameterized via CDK context variables.
@@ -96,8 +96,22 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cdk bootstrap
+
+# Build the git-ignored Lambda/AgentCore code assets (ARM/x86 wheels, no Docker)
+bash scripts/build_layer.sh             # Strands layer (fallback Lambdas)
+bash scripts/build_agentcore_assets.sh  # AgentCore runtime packages (build/ac_*)
+
 cdk deploy --all
+
+# Two-phase: build + upload the React portal once its API/Cognito exist
+bash scripts/build_frontend.sh
+cdk deploy FrontendStack
 ```
+
+The two Strands agents are deployed on **Amazon Bedrock AgentCore** entirely via CDK
+(`aws_bedrockagentcore.CfnRuntime` with the code shipped as S3 assets) — no Docker and
+no out-of-band toolkit. The ingestion Lambda invokes the router runtime (ARN via SSM),
+which delegates to the waiver runtime.
 
 ---
 
