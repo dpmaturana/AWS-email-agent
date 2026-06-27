@@ -1,18 +1,24 @@
 import json
 import os
 import re
+import uuid
 import boto3
 from datetime import datetime, timezone
 from strands import tool
 
-ses = boto3.client("ses", region_name="eu-west-1")
-s3 = boto3.client("s3", region_name="eu-west-1")
-lambda_client = boto3.client("lambda", region_name="eu-west-1")
-bedrock_runtime = boto3.client("bedrock-runtime", region_name="eu-west-1")
+_REGION = os.environ.get("AWS_REGION", "eu-west-1")
+ses = boto3.client("ses", region_name=_REGION)
+s3 = boto3.client("s3", region_name=_REGION)
+lambda_client = boto3.client("lambda", region_name=_REGION)
+bedrock_runtime = boto3.client("bedrock-runtime", region_name=_REGION)
+agentcore_client = boto3.client("bedrock-agentcore", region_name=_REGION)
 
 EMAIL_FROM = os.environ["EMAIL_FROM"]
 RAG_LAMBDA_ARN = os.environ["RAG_LAMBDA_ARN"]
-WAIVER_AGENT_LAMBDA_ARN = os.environ["WAIVER_AGENT_LAMBDA_ARN"]
+WAIVER_AGENT_LAMBDA_ARN = os.environ.get("WAIVER_AGENT_LAMBDA_ARN", "")
+# When set, the waiver agent runs on Amazon Bedrock AgentCore (preferred);
+# otherwise we fall back to invoking the waiver agent Lambda.
+WAIVER_AGENT_RUNTIME_ARN = os.environ.get("WAIVER_AGENT_RUNTIME_ARN", "")
 RAW_EMAILS_BUCKET = os.environ.get("RAW_EMAILS_BUCKET", "")
 
 _DEPT_SLUG = {
@@ -308,15 +314,35 @@ def invoke_waiver_agent(
             "message_id": message_id,
             "attachments": attachments,
         }
+
+        # Preferred path: the waiver agent runs on Amazon Bedrock AgentCore.
+        if WAIVER_AGENT_RUNTIME_ARN:
+            # AgentCore requires a session id of at least 33 chars; reuse the
+            # thread so replies share the same runtime session.
+            seed = (thread_id or message_id or uuid.uuid4().hex)
+            session_id = (re.sub(r"[^A-Za-z0-9]", "", seed) + uuid.uuid4().hex)[:64]
+            if len(session_id) < 33:
+                session_id = (session_id + uuid.uuid4().hex)[:64]
+            agentcore_client.invoke_agent_runtime(
+                agentRuntimeArn=WAIVER_AGENT_RUNTIME_ARN,
+                runtimeSessionId=session_id,
+                payload=json.dumps(payload).encode("utf-8"),
+                contentType="application/json",
+                accept="application/json",
+            )
+            return {"success": True, "runtime": "agentcore", "note": "Waiver agent (AgentCore) invoked"}
+
+        # Fallback: invoke the waiver agent Lambda asynchronously.
         response = lambda_client.invoke(
             FunctionName=WAIVER_AGENT_LAMBDA_ARN,
-            InvocationType="Event",  # async — waiver processing can take time
+            InvocationType="Event",
             Payload=json.dumps(payload),
         )
         return {
             "success": True,
+            "runtime": "lambda",
             "status_code": response["StatusCode"],
-            "note": "Waiver agent invoked asynchronously"
+            "note": "Waiver agent (Lambda) invoked asynchronously",
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

@@ -192,6 +192,10 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
         # ------------------------------------------------------------------ #
 
         email_from = self.node.try_get_context("email_from")
+        # ARN of the waiver agent deployed on Amazon Bedrock AgentCore (created
+        # out-of-band by scripts/deploy_agentcore.sh). When set, the router
+        # invokes the AgentCore runtime instead of the waiver Lambda.
+        waiver_runtime_arn = self.node.try_get_context("waiver_agent_runtime_arn") or ""
 
         strands_layer = lambda_.LayerVersion(
             self, "StrandsAgentsLayer",
@@ -294,6 +298,12 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
                         ],
                     ),
                     iam.PolicyStatement(
+                        actions=["bedrock-agentcore:InvokeAgentRuntime"],
+                        resources=[
+                            f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:runtime/*",
+                        ],
+                    ),
+                    iam.PolicyStatement(
                         actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
                         resources=[
                             "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0",
@@ -319,12 +329,13 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
             timeout=cdk.Duration.seconds(300),
             memory_size=512,
             environment={
-                "EMAIL_FROM":              email_from,
-                "RAG_LAMBDA_ARN":          rag.rag_lambda.function_arn,
-                "WAIVER_AGENT_LAMBDA_ARN": self.waiver_agent_lambda.function_arn,
-                "RAW_EMAILS_BUCKET":       infra.raw_emails_bucket.bucket_name,
-                "GUARDRAIL_ID":            self.guardrail.attr_guardrail_id,
-                "GUARDRAIL_VERSION":       guardrail_version.attr_version,
+                "EMAIL_FROM":               email_from,
+                "RAG_LAMBDA_ARN":           rag.rag_lambda.function_arn,
+                "WAIVER_AGENT_LAMBDA_ARN":  self.waiver_agent_lambda.function_arn,
+                "WAIVER_AGENT_RUNTIME_ARN": waiver_runtime_arn,
+                "RAW_EMAILS_BUCKET":        infra.raw_emails_bucket.bucket_name,
+                "GUARDRAIL_ID":             self.guardrail.attr_guardrail_id,
+                "GUARDRAIL_VERSION":        guardrail_version.attr_version,
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )

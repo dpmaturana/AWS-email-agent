@@ -19,6 +19,7 @@
     "approver_email": "shuli269594@gmail.com",
     "manage_ses_identities": false,
     "inbound_domain": "emailwaiver.xyz",
+    "waiver_agent_runtime_arn": "arn:aws:bedrock-agentcore:eu-west-1:697196251433:runtime/waiveragent-RM8nDp4LZ3",
     "router_agent_id_param": "/email-agent/router/agent-id",
     "router_agent_alias_param": "/email-agent/router/agent-alias-id"
   }
