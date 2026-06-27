@@ -208,7 +208,7 @@ class RagStack(cdk.Stack):
             knowledge_base_configuration=bedrock.CfnKnowledgeBase.KnowledgeBaseConfigurationProperty(
                 type="VECTOR",
                 vector_knowledge_base_configuration=bedrock.CfnKnowledgeBase.VectorKnowledgeBaseConfigurationProperty(
-                    embedding_model_arn="arn:aws:bedrock:eu-west-1::foundation-model/amazon.titan-embed-text-v2:0",
+                    embedding_model_arn=f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-embed-text-v2:0",
                 ),
             ),
             storage_configuration=bedrock.CfnKnowledgeBase.StorageConfigurationProperty(

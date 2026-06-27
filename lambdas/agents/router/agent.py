@@ -1,3 +1,5 @@
+import os
+
 from strands import Agent
 from strands.models import BedrockModel
 from tools import (
@@ -166,10 +168,16 @@ Call the appropriate tool with accurate parameters extracted from the email.
 
 
 def create_router_agent() -> Agent:
-    model = BedrockModel(
-        model_id="eu.amazon.nova-pro-v1:0",
-        region_name="eu-west-1",
-    )
+    # Apply the shared Bedrock Guardrail (PII filtering + denied topics) when its
+    # id is injected via env. region defaults to the Lambda's own region.
+    model_kwargs = {
+        "model_id": "eu.amazon.nova-pro-v1:0",
+        "region_name": os.environ.get("AWS_REGION", "eu-west-1"),
+    }
+    if os.environ.get("GUARDRAIL_ID"):
+        model_kwargs["guardrail_id"] = os.environ["GUARDRAIL_ID"]
+        model_kwargs["guardrail_version"] = os.environ.get("GUARDRAIL_VERSION", "DRAFT")
+    model = BedrockModel(**model_kwargs)
 
     return Agent(
         model=model,

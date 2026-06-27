@@ -16,7 +16,7 @@ The system reduces manual email triage and accelerates response times for the mo
 
 ## Agentic Application
 
-The core of the system is a multi-agent application built with **Strands Agents** and deployed on **Amazon Bedrock AgentCore**.
+The core of the system is a multi-agent application built with **Strands Agents**, packaged via a Lambda layer and run on **AWS Lambda** — the router and waiver-processor agents are each a Lambda function that invokes Amazon Bedrock models (Nova Pro) with a shared Bedrock Guardrail.
 
 ### Agent 1 — Email Router
 Receives each parsed incoming email and is responsible for:
@@ -35,7 +35,7 @@ Invoked by Agent 1 when a waiver request is detected. Manages the full waiver li
 
 This iterative loop can run as many cycles as needed until the agent has sufficient information to proceed to a decision.
 
-Both agents are configured with **Bedrock Guardrails** for PII filtering and topic grounding, and use **AgentCore session memory** to maintain full context across a multi-email conversation thread with the same student.
+Both agents are configured with the same **Bedrock Guardrail** for PII filtering and topic grounding, and maintain full context across a multi-email conversation thread with the same student via **DynamoDB thread state** (the waiver record is reloaded at the start of every reply).
 
 ---
 
@@ -47,8 +47,8 @@ Both agents are configured with **Bedrock Guardrails** for PII filtering and top
 |---|---|---|
 | Ingestion | Amazon SES | Receives incoming emails |
 | Ingestion | Amazon S3 | Stores raw emails and internal documents |
-| Ingestion | AWS Lambda | Parses emails, detects reply threads, invokes AgentCore |
-| Agents | Amazon Bedrock AgentCore | Hosts and runs both Strands agents |
+| Ingestion | AWS Lambda | Parses emails, detects reply threads, invokes the router agent Lambda |
+| Agents | AWS Lambda (Strands Agents) | Hosts and runs both Strands agents (Bedrock models via a Lambda layer) |
 | Agents | Amazon Bedrock Guardrails | PII filtering and topic enforcement |
 | Knowledge | Amazon Bedrock Knowledge Bases | RAG retrieval over IE's internal policy documents |
 | Knowledge | Amazon OpenSearch Serverless | Vector index for semantic search |
@@ -63,7 +63,7 @@ Both agents are configured with **Bedrock Guardrails** for PII filtering and top
 ### Execution flow
 
 1. A student or applicant sends an email to IE's central administrative inbox via SES, which saves it to S3
-2. A Lambda parses the email, reads the In-Reply-To header to detect if it belongs to an existing thread, and invokes Agent 1 via Bedrock AgentCore
+2. A Lambda parses the email, reads the In-Reply-To header to detect if it belongs to an existing thread, and invokes Agent 1 (the router agent Lambda)
 3. Agent 1 classifies the email by department and intent:
    - If **forward**: routes the email to the appropriate department team via SES — no reply is sent to the student
    - If **RAG**: queries IE's internal knowledge base, composes a response, and sends it directly to the student
@@ -84,7 +84,7 @@ The entire infrastructure is defined using **AWS CDK (Python)** organized in fiv
 - InfraStack — SES, S3 buckets, ingestion Lambda
 - RagStack — Bedrock Knowledge Base, OpenSearch Serverless, retrieval Lambda
 - WaiverStack — DynamoDB, Step Functions, waiver tool Lambdas, approval Lambda
-- AgentStack — both Strands agents on AgentCore, Guardrails
+- AgentStack — both Strands agents on Lambda (Strands layer), Bedrock Guardrail
 - FrontendStack — Cognito, API Gateway, S3 + CloudFront
 
 All stacks are account-agnostic and parameterized via CDK context variables.
@@ -109,7 +109,7 @@ Fixed costs are minimal — primarily the OpenSearch Serverless collection (acti
 
 | Component | Cost driver |
 |---|---|
-| Bedrock AgentCore | Per agent invocation + input/output tokens |
+| Bedrock models (agent inference) | Per agent invocation + input/output tokens |
 | Bedrock Knowledge Bases | Per retrieval query |
 | Lambda | Per invocation + duration |
 | SES | Per email sent and received |
@@ -125,5 +125,5 @@ A detailed cost breakdown per email processed — separating simple routing, RAG
 - The system operates in SES sandbox mode for development — all sender and recipient addresses must be manually verified. In production, IE's institutional domain would be used instead.
 - Waiver criteria are defined as static JSON files in S3, representing IE's current policy requirements per waiver type. Updates to criteria require a manual file upload.
 - The administrator approval platform has no role-based access control beyond Cognito authentication — all authenticated administrators can review any department's waivers. Department-level access control is out of scope for this version.
-- AgentCore session memory is scoped to a single session. Cross-session memory (across multiple emails from the same student) relies on DynamoDB thread history loaded at the start of each invocation.
+- Agents are stateless per invocation. Memory across multiple emails from the same student relies on DynamoDB thread history (the waiver record), loaded at the start of each invocation.
 - The RAG knowledge base is populated with manually uploaded policy documents. Integration with IE's document management systems is out of scope.

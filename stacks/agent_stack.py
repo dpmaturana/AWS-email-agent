@@ -68,7 +68,7 @@ class AgentStack(cdk.Stack):
                         actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
                         resources=[
                             "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6",
-                            "arn:aws:bedrock:eu-west-1::foundation-model/eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                            f"arn:aws:bedrock:{self.region}::foundation-model/eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         ],
                     ),
                     iam.PolicyStatement(
@@ -231,8 +231,12 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
                         actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
                         resources=[
                             "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0",
-                            f"arn:aws:bedrock:eu-west-1:{self.account}:inference-profile/eu.amazon.nova-pro-v1:0",
+                            f"arn:aws:bedrock:{self.region}:{self.account}:inference-profile/eu.amazon.nova-pro-v1:0",
                         ],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["bedrock:ApplyGuardrail"],
+                        resources=[self.guardrail.attr_guardrail_arn],
                     ),
                 ])
             },
@@ -254,6 +258,8 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
                 "START_WAIVER_LAMBDA_ARN": waiver.start_waiver_lambda.function_arn,
                 "UPDATE_WAIVER_LAMBDA_ARN": waiver.update_waiver_lambda.function_arn,
                 "GET_WAIVER_LAMBDA_ARN":   waiver.get_waiver_lambda.function_arn,
+                "GUARDRAIL_ID":            self.guardrail.attr_guardrail_id,
+                "GUARDRAIL_VERSION":       guardrail_version.attr_version,
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )
@@ -291,8 +297,12 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
                         actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
                         resources=[
                             "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0",
-                            f"arn:aws:bedrock:eu-west-1:{self.account}:inference-profile/eu.amazon.nova-pro-v1:0",
+                            f"arn:aws:bedrock:{self.region}:{self.account}:inference-profile/eu.amazon.nova-pro-v1:0",
                         ],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["bedrock:ApplyGuardrail"],
+                        resources=[self.guardrail.attr_guardrail_arn],
                     ),
                 ])
             },
@@ -313,6 +323,8 @@ Never approve or reject a waiver yourself — that decision belongs to a human a
                 "RAG_LAMBDA_ARN":          rag.rag_lambda.function_arn,
                 "WAIVER_AGENT_LAMBDA_ARN": self.waiver_agent_lambda.function_arn,
                 "RAW_EMAILS_BUCKET":       infra.raw_emails_bucket.bucket_name,
+                "GUARDRAIL_ID":            self.guardrail.attr_guardrail_id,
+                "GUARDRAIL_VERSION":       guardrail_version.attr_version,
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )
