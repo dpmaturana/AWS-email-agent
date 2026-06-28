@@ -31,6 +31,8 @@ logger.setLevel(logging.INFO)
 
 dynamodb          = boto3.resource("dynamodb", region_name=os.environ["AWS_REGION"])
 sns               = boto3.client("sns",        region_name=os.environ["AWS_REGION"])
+ses               = boto3.client("ses",        region_name=os.environ["AWS_REGION"])
+EMAIL_FROM        = os.environ.get("EMAIL_FROM", "")
 
 
 def _now() -> str:
@@ -101,5 +103,33 @@ def handler(event: dict, context) -> dict:
     except ClientError as exc:
         # Non-fatal — token is stored, workflow continues
         logger.error("SNS publish failed (non-fatal): %s", exc)
+
+    # ----------------------------------------------------------------
+    # 3. Confirm to the student that their complete request is now in review
+    # ----------------------------------------------------------------
+    if EMAIL_FROM and email_from:
+        nice_type = waiver_type.replace("_", " ")
+        student_body = (
+            f"Dear student,\n\n"
+            f"Thank you for your {nice_type} request (Reference: {waiver_id}).\n\n"
+            f"We have received all the required information and supporting documentation, "
+            f"and your request is now being reviewed by the responsible team. "
+            f"You will receive another email once a decision has been made.\n\n"
+            f"Best regards,\n"
+            f"IE University Student Services"
+        )
+        try:
+            ses.send_email(
+                Source=EMAIL_FROM,
+                Destination={"ToAddresses": [email_from]},
+                Message={
+                    "Subject": {"Data": f"Your {nice_type} request is being processed (Ref: {waiver_id})"},
+                    "Body": {"Text": {"Data": student_body}},
+                },
+            )
+            logger.info("Student 'being processed' email sent | waiver_id=%s", waiver_id)
+        except ClientError as exc:
+            # Non-fatal — approval still proceeds
+            logger.error("Student confirmation email failed (non-fatal): %s", exc)
 
     return {"waiver_id": waiver_id, "status": "pending_approval"}

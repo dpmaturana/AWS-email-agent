@@ -14,6 +14,7 @@ import json
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from agent import create_router_agent
+from tools import reset_action_guard
 
 app = BedrockAgentCoreApp()
 
@@ -60,6 +61,7 @@ def invoke(payload, context=None):
     """AgentCore entrypoint — runs the router Strands agent over the email payload."""
     message_id = payload.get("message_id", "")
     prompt = _build_prompt(payload)
+    reset_action_guard()  # fresh single-action guard per invocation (process is reused)
     agent = create_router_agent()
     result = agent(prompt)
     return {"message_id": message_id, "result": str(result)}

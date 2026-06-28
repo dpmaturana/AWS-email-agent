@@ -21,6 +21,31 @@ WAIVER_AGENT_LAMBDA_ARN = os.environ.get("WAIVER_AGENT_LAMBDA_ARN", "")
 WAIVER_AGENT_RUNTIME_ARN = os.environ.get("WAIVER_AGENT_RUNTIME_ARN", "")
 RAW_EMAILS_BUCKET = os.environ.get("RAW_EMAILS_BUCKET", "")
 
+# --------------------------------------------------------------------------- #
+# Single-action guard
+# Each email must trigger EXACTLY ONE action (route_email / RAG / waiver). The
+# Nova Pro router sometimes calls a second action tool (e.g. an extra route_email
+# "acknowledgement" after handing a waiver off), which sends the student a wrong
+# message. This guard makes only the FIRST action tool of an invocation take
+# effect; later ones become no-ops. reset_action_guard() is called by each
+# entrypoint before the agent runs, because the AgentCore process is reused
+# across invocations.
+# --------------------------------------------------------------------------- #
+_ACTION_TAKEN = {"value": False}
+
+
+def reset_action_guard() -> None:
+    _ACTION_TAKEN["value"] = False
+
+
+def _claim_action() -> bool:
+    """Return True if this is the first action this invocation; else False."""
+    if _ACTION_TAKEN["value"]:
+        return False
+    _ACTION_TAKEN["value"] = True
+    return True
+
+
 _DEPT_SLUG = {
     "administracionclientes@ie.edu": "administration",
     "sci-tech@ie.edu": "program_management",
@@ -100,6 +125,8 @@ def route_email(
     Returns:
         dict with delivery status for student reply and department CC
     """
+    if not _claim_action():
+        return {"skipped": True, "reason": "An action was already taken for this email; not routing."}
     dept = _DEPT_SLUG.get(destination_email.lower(),
                           re.sub(r"[^a-z0-9]+", "_", destination_email.split("@")[0]))
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -190,6 +217,8 @@ def query_knowledge_base_and_reply(
     Returns:
         dict with success status and answer summary
     """
+    if not _claim_action():
+        return {"skipped": True, "reason": "An action was already taken for this email; not replying."}
     try:
         # Call the RAG Lambda
         rag_response = lambda_client.invoke(
@@ -304,6 +333,8 @@ def invoke_waiver_agent(
     Returns:
         dict with waiver_id and status
     """
+    if not _claim_action():
+        return {"skipped": True, "reason": "An action was already taken for this email; not invoking waiver agent again."}
     try:
         payload = {
             "email_from": email_from,

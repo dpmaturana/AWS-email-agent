@@ -18,6 +18,8 @@ build_one() {
     --only-binary=:all: --target "$out" \
     strands-agents bedrock-agentcore
   cp "$ROOT/lambdas/agents/$src"/*.py "$out"/
+  # Ship any bundled data files (e.g. waiver_request_guidelines.md) too.
+  cp "$ROOT/lambdas/agents/$src"/*.md "$out"/ 2>/dev/null || true
   echo "built $out ($(du -sh "$out" | cut -f1))"
 }
 
