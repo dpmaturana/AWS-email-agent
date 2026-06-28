@@ -1,6 +1,6 @@
 import json
 import logging
-from agent import create_waiver_agent
+from waiver_agent import create_waiver_agent
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

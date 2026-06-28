@@ -37,6 +37,27 @@ s3 = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
 _lambda_client = boto3.client("lambda")
 _ssm = boto3.client("ssm")
+_agentcore_client = boto3.client("bedrock-agentcore")
+
+# Router AgentCore runtime ARN — resolved from env or SSM (published by AgentStack).
+# When set, the router agent runs on Amazon Bedrock AgentCore (preferred);
+# otherwise we fall back to invoking the router agent Lambda.
+ROUTER_RUNTIME_ARN_PARAM = os.environ.get("ROUTER_RUNTIME_ARN_PARAM", "/email-agent/router/runtime-arn")
+_router_runtime_arn_cache = None
+
+
+def _resolve_router_runtime_arn() -> str:
+    global _router_runtime_arn_cache
+    if _router_runtime_arn_cache is not None:
+        return _router_runtime_arn_cache
+    arn = os.environ.get("ROUTER_AGENT_RUNTIME_ARN", "")
+    if not arn and ROUTER_RUNTIME_ARN_PARAM:
+        try:
+            arn = _ssm.get_parameter(Name=ROUTER_RUNTIME_ARN_PARAM)["Parameter"]["Value"]
+        except Exception as exc:
+            print(f"[ingestion] could not read SSM param {ROUTER_RUNTIME_ARN_PARAM}: {exc}")
+    _router_runtime_arn_cache = arn or ""
+    return _router_runtime_arn_cache
 
 RAW_EMAILS_BUCKET = os.environ.get("RAW_EMAILS_BUCKET", "")
 WAIVER_TABLE_NAME = os.environ.get("WAIVER_TABLE_NAME", "waivers")
@@ -215,7 +236,34 @@ def _lookup_thread_id(in_reply_to):
 # --------------------------------------------------------------------------- #
 # 4. Invoke the router agent Lambda (Strands agent)
 # --------------------------------------------------------------------------- #
+def _invoke_router_runtime(payload, runtime_arn):
+    """Invoke the router agent deployed on Amazon Bedrock AgentCore Runtime."""
+    seed = payload.get("thread_id") or payload.get("message_id") or uuid.uuid4().hex
+    session_id = (re.sub(r"[^A-Za-z0-9]", "", seed) + uuid.uuid4().hex)[:64]
+    if len(session_id) < 33:
+        session_id = (session_id + uuid.uuid4().hex)[:64]
+    resp = _agentcore_client.invoke_agent_runtime(
+        agentRuntimeArn=runtime_arn,
+        runtimeSessionId=session_id,
+        payload=json.dumps(payload).encode("utf-8"),
+        contentType="application/json",
+        accept="application/json",
+    )
+    raw = resp["response"].read()
+    try:
+        data = json.loads(raw)
+        return data.get("result") or json.dumps(data)
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else str(raw)
+
+
 def _invoke_agent(payload):
+    # Preferred path: the router agent runs on Amazon Bedrock AgentCore.
+    runtime_arn = _resolve_router_runtime_arn()
+    if runtime_arn:
+        return _invoke_router_runtime(payload, runtime_arn)
+
+    # Fallback: invoke the router agent Lambda.
     arn = _resolve_router_lambda_arn()
     if not arn:
         print("[ingestion] router Lambda ARN not available — skipping agent invoke.")

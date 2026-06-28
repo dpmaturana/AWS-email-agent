@@ -1,3 +1,5 @@
+import os
+
 from strands import Agent
 from strands.models import BedrockModel
 from tools import (
@@ -78,6 +80,7 @@ Step 2 — Classify the intent
 Is this a waiver request? → invoke_waiver_agent
 The student is requesting an exception, exemption, or special consideration.
 Signal words: waiver, exception, request approval, special consideration, override, exempt, appeal.
+invoke_waiver_agent is your SINGLE, FINAL action for a waiver — the waiver agent handles ALL communication with the student itself (asking for missing information, confirming receipt, sending the decision). After you call it, you are DONE: do NOT also call route_email, do NOT send any acknowledgement, do NOT route the waiver to a department.
 When in doubt between RAG and waiver, use route_email to Student Services (student.services@ie.edu) — let a human decide.
 
 Is this a factual question answerable from IE documentation? → query_knowledge_base_and_reply
@@ -166,10 +169,16 @@ Call the appropriate tool with accurate parameters extracted from the email.
 
 
 def create_router_agent() -> Agent:
-    model = BedrockModel(
-        model_id="eu.amazon.nova-pro-v1:0",
-        region_name="eu-west-1",
-    )
+    # Apply the shared Bedrock Guardrail (PII filtering + denied topics) when its
+    # id is injected via env. region defaults to the Lambda's own region.
+    model_kwargs = {
+        "model_id": "eu.amazon.nova-pro-v1:0",
+        "region_name": os.environ.get("AWS_REGION", "eu-west-1"),
+    }
+    if os.environ.get("GUARDRAIL_ID"):
+        model_kwargs["guardrail_id"] = os.environ["GUARDRAIL_ID"]
+        model_kwargs["guardrail_version"] = os.environ.get("GUARDRAIL_VERSION", "DRAFT")
+    model = BedrockModel(**model_kwargs)
 
     return Agent(
         model=model,

@@ -4,6 +4,8 @@ import uuid
 import boto3
 from strands import tool
 
+from waiver_guidelines import IE_WAIVER_CRITERIA, FIELD_LABELS
+
 ses = boto3.client("ses", region_name=os.environ.get("AWS_REGION", "eu-west-1"))
 lambda_client = boto3.client("lambda", region_name=os.environ.get("AWS_REGION", "eu-west-1"))
 s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "eu-west-1"))
@@ -30,21 +32,25 @@ def get_waiver_criteria(waiver_type: str, department: str) -> dict:
     Returns:
         dict with required_fields, required_documents, approval_conditions
     """
+    # Baseline: the IE University waiver request guidelines (see
+    # waiver_guidelines.py / scripts/waiver_request_guidelines.md). A
+    # department/type-specific JSON in S3 overrides this when one exists.
+    baseline = dict(IE_WAIVER_CRITERIA)
+    baseline["note"] = (
+        f"No specific criteria found for {waiver_type} in {department}. "
+        f"Applying the standard IE waiver request guidelines."
+    )
     try:
         key = f"{department}/{waiver_type}.json"
         response = s3.get_object(Bucket=WAIVER_CRITERIA_BUCKET, Key=key)
-        criteria = json.loads(response["Body"].read())
-        return criteria
-    except s3.exceptions.NoSuchKey:
-        # Fallback: return generic criteria if specific type not found
-        return {
-            "required_fields": ["student_name", "student_id", "reason", "supporting_context"],
-            "required_documents": [],
-            "approval_conditions": ["Reviewed and approved by department coordinator"],
-            "note": f"No specific criteria found for {waiver_type} in {department}. Using generic criteria."
-        }
+        return json.loads(response["Body"].read())
     except Exception as e:
-        return {"error": str(e)}
+        # Fall back to the standard guidelines for ANY read failure — most
+        # commonly a missing key. Note: without s3:ListBucket, S3 returns 403
+        # AccessDenied (not 404 NoSuchKey) for absent objects, so we must not
+        # special-case NoSuchKey here or the agent stalls on an empty bucket.
+        print(f"get_waiver_criteria: falling back to IE guidelines ({type(e).__name__}: {e})")
+        return baseline
 
 
 @tool
@@ -70,6 +76,7 @@ def check_completeness(
 
     required_fields = criteria.get("required_fields", [])
     required_documents = criteria.get("required_documents", [])
+    min_documents = criteria.get("min_documents", 0)
 
     for field in required_fields:
         if field not in collected_info or not collected_info[field]:
@@ -80,6 +87,11 @@ def check_completeness(
         found = any(doc.lower() in name for name in attachment_names)
         if not found:
             missing_documents.append(doc)
+
+    # The guidelines require at least one supporting document, whatever its type.
+    # Flag it only when no named document already covers the requirement.
+    if min_documents and len(attachments) < min_documents and not missing_documents:
+        missing_documents.append("supporting_documentation")
 
     is_complete = len(missing_fields) == 0 and len(missing_documents) == 0
 
@@ -117,13 +129,20 @@ def request_missing_info(
     if missing_fields:
         missing_items.append("Please provide the following information:")
         for field in missing_fields:
-            readable = field.replace("_", " ").capitalize()
+            readable = FIELD_LABELS.get(field, field.replace("_", " ").capitalize())
             missing_items.append(f"  - {readable}")
 
     if missing_documents:
-        missing_items.append("\nPlease attach the following documents:")
+        missing_items.append("\nPlease attach the following supporting documentation:")
         for doc in missing_documents:
-            missing_items.append(f"  - {doc}")
+            if doc == "supporting_documentation":
+                readable = (
+                    "At least one supporting document for your stated reason "
+                    "(e.g. medical note, travel-delay proof, or interview invitation)"
+                )
+            else:
+                readable = doc
+            missing_items.append(f"  - {readable}")
 
     body = (
         f"Dear student,\n\n"
@@ -156,7 +175,8 @@ def start_waiver_workflow(
     waiver_type: str,
     collected_info: dict,
     missing_fields: list,
-    message_id: str
+    message_id: str,
+    attachments: list = None
 ) -> dict:
     """
     Creates the waiver record and starts the Step Functions approval workflow.
@@ -170,6 +190,9 @@ def start_waiver_workflow(
         collected_info: Information collected so far
         missing_fields: Fields still missing
         message_id: Original email message ID
+        attachments: Supporting documents the student submitted, as received in the
+            request (list of {filename, s3_key, content_type}). Pass them through so
+            the approver can view the submitted documents in the portal.
 
     Returns:
         dict with waiver_id and task_token
@@ -187,6 +210,7 @@ def start_waiver_workflow(
                 "collected_info": collected_info,
                 "missing_fields": missing_fields,
                 "message_id": message_id,
+                "attachments": attachments or [],
             }),
         )
         result = json.loads(response["Payload"].read())
@@ -223,7 +247,8 @@ def get_waiver_state(waiver_id: str) -> dict:
 def update_waiver_state(
     waiver_id: str,
     new_info: dict,
-    missing_fields: list
+    missing_fields: list,
+    new_attachments: list = None
 ) -> dict:
     """
     Updates the waiver record in DynamoDB with newly collected information
@@ -234,6 +259,9 @@ def update_waiver_state(
         waiver_id: The waiver ID to update
         new_info: New fields collected from the latest email
         missing_fields: Updated list of what is still missing
+        new_attachments: Any supporting documents attached to this reply
+            (list of {filename, s3_key, content_type}). They are appended to the
+            documents already on file so the approver can view all of them.
 
     Returns:
         dict with success status
@@ -246,6 +274,7 @@ def update_waiver_state(
                 "waiver_id": waiver_id,
                 "new_info": new_info,
                 "missing_fields": missing_fields,
+                "new_attachments": new_attachments or [],
             }),
         )
         return json.loads(response["Payload"].read())

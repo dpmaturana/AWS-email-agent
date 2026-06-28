@@ -5,6 +5,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_iam as iam,
     aws_s3 as s3,
+    aws_s3_deployment as s3deploy,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
     aws_logs as logs,
@@ -13,7 +14,7 @@ from constructs import Construct
 
 
 class FrontendStack(cdk.Stack):
-    def __init__(self, scope: Construct, construct_id: str, waiver, **kwargs):
+    def __init__(self, scope: Construct, construct_id: str, waiver, infra, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
         # ------------------------------------------------------------------ #
@@ -71,8 +72,8 @@ class FrontendStack(cdk.Stack):
                         resources=[waiver.approval_lambda.function_arn],
                     ),
                     iam.PolicyStatement(
-                        actions=["s3:GetObject"],
-                        resources=["*"],  # for presigned URL generation
+                        actions=["s3:GetObject"],  # presign attachment download URLs
+                        resources=[f"{infra.raw_emails_bucket.bucket_arn}/*"],
                     ),
                 ])
             },
@@ -81,6 +82,8 @@ class FrontendStack(cdk.Stack):
         shared_env = {
             "WAIVER_TABLE_NAME": waiver.waiver_table.table_name,
             "APPROVAL_LAMBDA_ARN": waiver.approval_lambda.function_arn,
+            # Bucket where student attachments live — GetWaiver presigns from it.
+            "RAW_EMAILS_BUCKET": infra.raw_emails_bucket.bucket_name,
         }
 
         # ------------------------------------------------------------------ #
@@ -189,6 +192,21 @@ class FrontendStack(cdk.Stack):
                 ),
             ],
             default_root_object="index.html",
+        )
+
+        # ------------------------------------------------------------------ #
+        # DEPLOY THE BUILT REACT APP
+        # Build the SPA first (scripts/build_frontend.sh bakes the API URL +
+        # Cognito IDs into the bundle) so frontend/dist exists at synth time,
+        # then upload it and invalidate the CloudFront cache.
+        # ------------------------------------------------------------------ #
+
+        s3deploy.BucketDeployment(
+            self, "SpaDeployment",
+            sources=[s3deploy.Source.asset("frontend/dist")],
+            destination_bucket=spa_bucket,
+            distribution=distribution,
+            distribution_paths=["/*"],
         )
 
         # ------------------------------------------------------------------ #

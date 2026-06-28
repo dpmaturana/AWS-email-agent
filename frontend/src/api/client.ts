@@ -1,16 +1,29 @@
+import { fetchAuthSession } from 'aws-amplify/auth'
 import type { DecideBody, WaiverDetail, WaiverListResponse } from '../types/waiver'
 import { MOCK_DETAILS, MOCK_WAIVERS } from './mock'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
+// Strip any trailing slash so `${API_BASE}/waivers` doesn't become `//waivers`.
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
 const USE_MOCK = false
 
+async function authHeader(): Promise<string> {
+  // Pull a fresh Cognito ID token from the Amplify session on each request —
+  // Amplify auto-refreshes it, so there's no stale-token problem.
+  try {
+    const session = await fetchAuthSession()
+    const token = session.tokens?.idToken?.toString()
+    return token ? `Bearer ${token}` : ''
+  } catch {
+    return ''
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('id_token') ?? ''
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: await authHeader(),
       ...init?.headers,
     },
   })

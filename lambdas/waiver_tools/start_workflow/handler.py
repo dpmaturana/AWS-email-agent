@@ -25,6 +25,7 @@ def handler(event, context):
     waiver_type    = event.get("waiver_type", "")
     collected_info = event.get("collected_info", {})
     missing_fields = event.get("missing_fields", [])
+    attachments    = event.get("attachments", []) or []
 
     table   = dynamodb.Table(os.environ["WAIVER_TABLE"])
     sfn_arn = os.environ["SFN_ARN"]
@@ -39,6 +40,7 @@ def handler(event, context):
         "status":             "pending_info" if missing_fields else "pending_approval",
         "collected_info":     collected_info,
         "missing_fields":     missing_fields,
+        "attachments":        attachments,
         "criteria":           {},
         "task_token":         None,
         "history": [{
@@ -59,6 +61,17 @@ def handler(event, context):
         else:
             logger.error("DynamoDB put_item failed: %s", e)
             return {"success": False, "error": str(e)}
+
+    # Only complete requests enter the human approval workflow. When information
+    # or documents are still missing, the record stays in "pending_info" and the
+    # agent emails the student for what is missing — the approver is NOT notified
+    # until the request is complete (the SFN is started later by update_state).
+    if missing_fields:
+        logger.info(
+            "Waiver %s incomplete (missing=%s) — holding for info, not starting approval",
+            waiver_id, missing_fields,
+        )
+        return {"success": True, "waiver_id": waiver_id, "task_token": "", "status": "pending_info"}
 
     try:
         sfn_resp      = sfn.start_execution(
@@ -93,4 +106,4 @@ def handler(event, context):
         ExpressionAttributeValues={":arn": execution_arn, ":ts": _now()},
     )
 
-    return {"success": True, "waiver_id": waiver_id, "task_token": task_token}
+    return {"success": True, "waiver_id": waiver_id, "task_token": task_token, "status": "pending_approval"}

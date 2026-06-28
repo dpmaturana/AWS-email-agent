@@ -119,9 +119,9 @@ export function WaiverDetailPage() {
           )}
         </Section>
 
-        {/* Attachments */}
-        {waiver.attachments.length > 0 && (
-          <Section title="Attachments">
+        {/* Submitted Documents */}
+        <Section title="Submitted Documents">
+          {waiver.attachments.length > 0 ? (
             <ul className="space-y-2">
               {waiver.attachments.map(a => (
                 <li key={a.filename}>
@@ -137,8 +137,10 @@ export function WaiverDetailPage() {
                 </li>
               ))}
             </ul>
-          </Section>
-        )}
+          ) : (
+            <p className="text-sm text-gray-500">No documents submitted yet.</p>
+          )}
+        </Section>
 
         {/* History */}
         <Section title="Event History">

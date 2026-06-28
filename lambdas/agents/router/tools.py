@@ -1,19 +1,50 @@
 import json
 import os
 import re
+import uuid
 import boto3
 from datetime import datetime, timezone
 from strands import tool
 
-ses = boto3.client("ses", region_name="eu-west-1")
-s3 = boto3.client("s3", region_name="eu-west-1")
-lambda_client = boto3.client("lambda", region_name="eu-west-1")
-bedrock_runtime = boto3.client("bedrock-runtime", region_name="eu-west-1")
+_REGION = os.environ.get("AWS_REGION", "eu-west-1")
+ses = boto3.client("ses", region_name=_REGION)
+s3 = boto3.client("s3", region_name=_REGION)
+lambda_client = boto3.client("lambda", region_name=_REGION)
+bedrock_runtime = boto3.client("bedrock-runtime", region_name=_REGION)
+agentcore_client = boto3.client("bedrock-agentcore", region_name=_REGION)
 
 EMAIL_FROM = os.environ["EMAIL_FROM"]
 RAG_LAMBDA_ARN = os.environ["RAG_LAMBDA_ARN"]
-WAIVER_AGENT_LAMBDA_ARN = os.environ["WAIVER_AGENT_LAMBDA_ARN"]
+WAIVER_AGENT_LAMBDA_ARN = os.environ.get("WAIVER_AGENT_LAMBDA_ARN", "")
+# When set, the waiver agent runs on Amazon Bedrock AgentCore (preferred);
+# otherwise we fall back to invoking the waiver agent Lambda.
+WAIVER_AGENT_RUNTIME_ARN = os.environ.get("WAIVER_AGENT_RUNTIME_ARN", "")
 RAW_EMAILS_BUCKET = os.environ.get("RAW_EMAILS_BUCKET", "")
+
+# --------------------------------------------------------------------------- #
+# Single-action guard
+# Each email must trigger EXACTLY ONE action (route_email / RAG / waiver). The
+# Nova Pro router sometimes calls a second action tool (e.g. an extra route_email
+# "acknowledgement" after handing a waiver off), which sends the student a wrong
+# message. This guard makes only the FIRST action tool of an invocation take
+# effect; later ones become no-ops. reset_action_guard() is called by each
+# entrypoint before the agent runs, because the AgentCore process is reused
+# across invocations.
+# --------------------------------------------------------------------------- #
+_ACTION_TAKEN = {"value": False}
+
+
+def reset_action_guard() -> None:
+    _ACTION_TAKEN["value"] = False
+
+
+def _claim_action() -> bool:
+    """Return True if this is the first action this invocation; else False."""
+    if _ACTION_TAKEN["value"]:
+        return False
+    _ACTION_TAKEN["value"] = True
+    return True
+
 
 _DEPT_SLUG = {
     "administracionclientes@ie.edu": "administration",
@@ -94,6 +125,8 @@ def route_email(
     Returns:
         dict with delivery status for student reply and department CC
     """
+    if not _claim_action():
+        return {"skipped": True, "reason": "An action was already taken for this email; not routing."}
     dept = _DEPT_SLUG.get(destination_email.lower(),
                           re.sub(r"[^a-z0-9]+", "_", destination_email.split("@")[0]))
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -184,6 +217,8 @@ def query_knowledge_base_and_reply(
     Returns:
         dict with success status and answer summary
     """
+    if not _claim_action():
+        return {"skipped": True, "reason": "An action was already taken for this email; not replying."}
     try:
         # Call the RAG Lambda
         rag_response = lambda_client.invoke(
@@ -298,6 +333,8 @@ def invoke_waiver_agent(
     Returns:
         dict with waiver_id and status
     """
+    if not _claim_action():
+        return {"skipped": True, "reason": "An action was already taken for this email; not invoking waiver agent again."}
     try:
         payload = {
             "email_from": email_from,
@@ -308,15 +345,35 @@ def invoke_waiver_agent(
             "message_id": message_id,
             "attachments": attachments,
         }
+
+        # Preferred path: the waiver agent runs on Amazon Bedrock AgentCore.
+        if WAIVER_AGENT_RUNTIME_ARN:
+            # AgentCore requires a session id of at least 33 chars; reuse the
+            # thread so replies share the same runtime session.
+            seed = (thread_id or message_id or uuid.uuid4().hex)
+            session_id = (re.sub(r"[^A-Za-z0-9]", "", seed) + uuid.uuid4().hex)[:64]
+            if len(session_id) < 33:
+                session_id = (session_id + uuid.uuid4().hex)[:64]
+            agentcore_client.invoke_agent_runtime(
+                agentRuntimeArn=WAIVER_AGENT_RUNTIME_ARN,
+                runtimeSessionId=session_id,
+                payload=json.dumps(payload).encode("utf-8"),
+                contentType="application/json",
+                accept="application/json",
+            )
+            return {"success": True, "runtime": "agentcore", "note": "Waiver agent (AgentCore) invoked"}
+
+        # Fallback: invoke the waiver agent Lambda asynchronously.
         response = lambda_client.invoke(
             FunctionName=WAIVER_AGENT_LAMBDA_ARN,
-            InvocationType="Event",  # async — waiver processing can take time
+            InvocationType="Event",
             Payload=json.dumps(payload),
         )
         return {
             "success": True,
+            "runtime": "lambda",
             "status_code": response["StatusCode"],
-            "note": "Waiver agent invoked asynchronously"
+            "note": "Waiver agent (Lambda) invoked asynchronously",
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

@@ -16,6 +16,6 @@ infra = InfraStack(app, "InfraStack", env=env)
 rag = RagStack(app, "RagStack", infra=infra, env=env)
 waiver = WaiverStack(app, "WaiverStack", infra=infra, env=env)
 agent = AgentStack(app, "AgentStack", infra=infra, rag=rag, waiver=waiver, env=env)
-frontend = FrontendStack(app, "FrontendStack", waiver=waiver, env=env)
+frontend = FrontendStack(app, "FrontendStack", waiver=waiver, infra=infra, env=env)
 
 app.synth()

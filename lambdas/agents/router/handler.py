@@ -1,6 +1,7 @@
 import json
 import logging
 from agent import create_router_agent
+from tools import reset_action_guard
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -66,6 +67,7 @@ Attachments: {json.dumps(attachments)}
 Please classify this email and take the appropriate action."""
 
     try:
+        reset_action_guard()  # fresh single-action guard per invocation (process is reused)
         agent = create_router_agent()
         result = agent(prompt)
 

@@ -94,7 +94,13 @@ class WaiverStack(cdk.Stack):
                         ],
                     ),
                     iam.PolicyStatement(
-                        actions=["states:StartExecution", "states:SendTaskSuccess", "states:SendTaskFailure"],
+                        actions=["states:StartExecution"],
+                        resources=[f"arn:aws:states:{self.region}:{self.account}:stateMachine:waiver-human-review"],
+                    ),
+                    iam.PolicyStatement(
+                        # SendTaskSuccess/Failure don't support resource-level IAM
+                        # (they're keyed by an opaque task token), so "*" is required.
+                        actions=["states:SendTaskSuccess", "states:SendTaskFailure"],
                         resources=["*"],
                     ),
                     iam.PolicyStatement(
@@ -106,7 +112,7 @@ class WaiverStack(cdk.Stack):
                     ),
                     iam.PolicyStatement(
                         actions=["ses:SendEmail", "ses:SendRawEmail"],
-                        resources=["*"],
+                        resources=[f"arn:aws:ses:{self.region}:{self.account}:identity/{self.node.try_get_context('email_from')}"],
                     ),
                     iam.PolicyStatement(
                         actions=["s3:GetObject"],
@@ -289,7 +295,12 @@ class WaiverStack(cdk.Stack):
             function_name="waiver-update-state",
             handler="handler.handler",
             code=lambda_.Code.from_asset("lambdas/waiver_tools/update_state"),
-            **common_lambda_kwargs,
+            # SFN_ARN so a reply that completes the request can start the
+            # approval workflow that start_workflow deliberately held back.
+            **{**common_lambda_kwargs, "environment": {
+                **shared_env,
+                "SFN_ARN": self.state_machine.state_machine_arn,
+            }},
         )
 
         self.get_waiver_lambda = lambda_.Function(
