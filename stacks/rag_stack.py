@@ -77,7 +77,7 @@ class RagStack(cdk.Stack):
                     ),
                     iam.PolicyStatement(
                         actions=["bedrock:InvokeModel"],
-                        resources=["arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"],
+                        resources=[f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-embed-text-v2:0"],
                     ),
                 ])
             },

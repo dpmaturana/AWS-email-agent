@@ -14,7 +14,7 @@ from constructs import Construct
 
 
 class FrontendStack(cdk.Stack):
-    def __init__(self, scope: Construct, construct_id: str, waiver, **kwargs):
+    def __init__(self, scope: Construct, construct_id: str, waiver, infra, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
         # ------------------------------------------------------------------ #
@@ -72,8 +72,8 @@ class FrontendStack(cdk.Stack):
                         resources=[waiver.approval_lambda.function_arn],
                     ),
                     iam.PolicyStatement(
-                        actions=["s3:GetObject"],
-                        resources=["*"],  # for presigned URL generation
+                        actions=["s3:GetObject"],  # presign attachment download URLs
+                        resources=[f"{infra.raw_emails_bucket.bucket_arn}/*"],
                     ),
                 ])
             },
@@ -82,6 +82,8 @@ class FrontendStack(cdk.Stack):
         shared_env = {
             "WAIVER_TABLE_NAME": waiver.waiver_table.table_name,
             "APPROVAL_LAMBDA_ARN": waiver.approval_lambda.function_arn,
+            # Bucket where student attachments live — GetWaiver presigns from it.
+            "RAW_EMAILS_BUCKET": infra.raw_emails_bucket.bucket_name,
         }
 
         # ------------------------------------------------------------------ #
